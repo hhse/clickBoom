@@ -1,5 +1,7 @@
 import SwiftUI
 import Combine
+import CoreGraphics
+import ServiceManagement
 
 // MARK: - 点击效果样式
 enum EffectStyle: String, CaseIterable, Identifiable {
@@ -135,6 +137,81 @@ class AppState: ObservableObject {
     }
 }
 
+// MARK: - 应用信息
+enum AppInfo {
+    static var version: String {
+        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.2"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "3"
+        return "\(short) (\(build))"
+    }
+}
+
+// MARK: - 开机自启
+@MainActor
+final class LaunchAtLogin: ObservableObject {
+    static let shared = LaunchAtLogin()
+
+    @Published private(set) var isEnabled = false
+    @Published private(set) var requiresApproval = false
+    @Published private(set) var message: String?
+
+    init() { refresh() }
+
+    func refresh() {
+        let status = SMAppService.mainApp.status
+        isEnabled = status == .enabled
+        requiresApproval = status == .requiresApproval
+    }
+
+    func setEnabled(_ enabled: Bool) {
+        message = nil
+        do {
+            if enabled {
+                if SMAppService.mainApp.status != .enabled {
+                    try SMAppService.mainApp.register()
+                }
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+        } catch {
+            message = "设置失败：\(error.localizedDescription)\n请先把 ClickBoom 拖进「应用程序」再试。"
+        }
+        refresh()
+        if requiresApproval {
+            message = "已登记，还需要在「系统设置 → 通用 → 登录项」里允许。"
+        }
+    }
+
+    func openLoginItemsSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+}
+
+// MARK: - 输入监控权限
+@MainActor
+final class InputPermission: ObservableObject {
+    static let shared = InputPermission()
+
+    @Published private(set) var isGranted = CGPreflightListenEventAccess()
+
+    func refresh() {
+        isGranted = CGPreflightListenEventAccess()
+    }
+
+    func request() {
+        _ = CGRequestListenEventAccess()
+        refresh()
+    }
+
+    func openSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+}
+
 // MARK: - 2. 程序入口
 @main
 struct ClickBoomApp: App {
@@ -160,6 +237,8 @@ struct ClickBoomApp: App {
 struct MenuBarQuickPanel: View {
     @Environment(\.openWindow) private var openWindow
     @StateObject private var appState = AppState.shared
+    @StateObject private var loginItem = LaunchAtLogin.shared
+    @StateObject private var permission = InputPermission.shared
 
     private var particleCount: Binding<Double> {
         Binding(
@@ -189,6 +268,24 @@ struct MenuBarQuickPanel: View {
             }
 
             Divider()
+
+            if !permission.isGranted {
+                Button {
+                    permission.request()
+                } label: {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        Text("缺少「输入监控」权限，点击特效不会触发。点这里开启。")
+                            .font(.system(size: 11))
+                            .multilineTextAlignment(.leading)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+
+                Divider()
+            }
 
             Menu {
                 ForEach(EffectPreset.allCases) { preset in
@@ -276,6 +373,26 @@ struct MenuBarQuickPanel: View {
 
             Divider()
 
+            Toggle("开机自启", isOn: Binding(
+                get: { loginItem.isEnabled },
+                set: { loginItem.setEnabled($0) }
+            ))
+            .toggleStyle(.switch)
+            .controlSize(.small)
+
+            if let message = loginItem.message {
+                Text(message)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if loginItem.requiresApproval {
+                Button("去「登录项」允许") { loginItem.openLoginItemsSettings() }
+                    .buttonStyle(.link)
+                    .font(.system(size: 10))
+            }
+
+            Divider()
+
             Button(role: .destructive) {
                 NSApp.terminate(nil)
             } label: {
@@ -283,6 +400,13 @@ struct MenuBarQuickPanel: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
+
+            HStack {
+                Spacer()
+                Text("v\(AppInfo.version)")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+            }
         }
         .padding(16)
         .frame(width: 320)
@@ -318,6 +442,8 @@ struct QuickSlider: View {
 // MARK: - 3. 控制面板视图 (Modern UI)
 struct ControlPanelView: View {
     @StateObject var appState = AppState.shared
+    @StateObject private var loginItem = LaunchAtLogin.shared
+    @StateObject private var permission = InputPermission.shared
     
     // 背景渐变
     let bgGradient = LinearGradient(
@@ -444,6 +570,67 @@ struct ControlPanelView: View {
                                 Label("当前连击 ×\(appState.comboCount)", systemImage: "flame.fill")
                                     .font(.system(size: 12, weight: .semibold))
                                     .foregroundColor(.orange)
+                            }
+                        }
+
+                        SectionCard(icon: "gearshape.2", title: "系统") {
+                            Toggle("开机自启", isOn: Binding(
+                                get: { loginItem.isEnabled },
+                                set: { loginItem.setEnabled($0) }
+                            ))
+                            .toggleStyle(.switch)
+                            .tint(.green)
+
+                            Text("登录 macOS 时自动启动 ClickBoom")
+                                .font(.system(size: 11))
+                                .foregroundColor(.white.opacity(0.45))
+
+                            if let message = loginItem.message {
+                                Text(message)
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.orange.opacity(0.9))
+                                    .fixedSize(horizontal: false, vertical: true)
+                            } else if loginItem.requiresApproval {
+                                Button("去「登录项」允许") { loginItem.openLoginItemsSettings() }
+                                    .buttonStyle(.link)
+                                    .font(.system(size: 11))
+                            }
+
+                            Divider().background(Color.white.opacity(0.1))
+
+                            HStack {
+                                Label("输入监控权限",
+                                      systemImage: permission.isGranted ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.8))
+                                Spacer()
+                                Text(permission.isGranted ? "已开启" : "未开启")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(permission.isGranted ? .green : .orange)
+                            }
+
+                            if !permission.isGranted {
+                                Button {
+                                    permission.request()
+                                } label: {
+                                    Label("开启输入监控", systemImage: "arrow.up.forward.app")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(.orange)
+                            }
+
+                            Divider().background(Color.white.opacity(0.1))
+
+                            HStack {
+                                Label("版本", systemImage: "tag")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.8))
+                                Spacer()
+                                Text(AppInfo.version)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundColor(.white.opacity(0.6))
                             }
                         }
                     }
@@ -633,11 +820,25 @@ extension Color {
 class AppDelegate: NSObject, NSApplicationDelegate {
     var overlayWindow: NSWindow!
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // 显式设置 Dock 图标：老版本图标资源为空，系统会缓存成「白纸」，
+        // 启动时用包内 AppIcon.icns 覆盖，确保 Dock 一定显示新图标。
+        NSApp.setActivationPolicy(.regular)
+        if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let icon = NSImage(contentsOf: iconURL) {
+            NSApp.applicationIconImage = icon
+        }
+
         guard let screen = NSScreen.main else { return }
         overlayWindow = NSWindow(contentRect: screen.frame, styleMask: [.borderless, .fullSizeContentView], backing: .buffered, defer: false)
         overlayWindow.isOpaque = false; overlayWindow.backgroundColor = .clear; overlayWindow.hasShadow = false; overlayWindow.level = .screenSaver; overlayWindow.ignoresMouseEvents = true
         overlayWindow.contentView = NSHostingView(rootView: EffectOverlayView())
         overlayWindow.makeKeyAndOrderFront(nil)
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        // 从系统设置改完权限 / 登录项切回来时刷新状态
+        InputPermission.shared.refresh()
+        LaunchAtLogin.shared.refresh()
     }
 }
 
