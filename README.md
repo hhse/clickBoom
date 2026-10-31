@@ -1,40 +1,91 @@
 # clickBoom
 
-一个Mac上的全局鼠标点击特效小玩具，使用Swift实现。
+一个轻量、原生的 macOS 全局鼠标点击特效工具。它会监听鼠标点击，并在点击位置绘制即时动画，让演示、录屏、直播和日常操作更有反馈感。
 
-## 项目介绍
+项目使用 SwiftUI 和 macOS 原生 API 编写，不依赖第三方运行库。
 
-这是一个在Mac上实现的全局鼠标点击特效工具，当用户点击鼠标时，会在点击位置产生炫酷的火花效果。
+## ✨ 功能特性
 
-## 实现技术
+- 全局监听鼠标左键点击
+- 4 种可切换的点击效果：
+  - 放射火花：经典的向外迸射线条
+  - 扩散波纹：从点击位置扩散的圆环
+  - 霓虹爆发：光束与中心亮点组合的爆发效果
+  - 彩纸喷射：带旋转和下落感的彩纸粒子
+- 支持自定义效果颜色
+- 支持调整粒子数量、大小、扩散半径、动画时长和缩放比例
+- 设置会自动保存，下次启动时继续使用
+- 使用透明悬浮层绘制，不影响鼠标正常操作
+- 原生 SwiftUI 界面，轻量且易于扩展
 
-使用Swift语言开发，利用Mac的原生API实现全局鼠标点击监听和动画效果。
+## 🖥️ 系统要求
 
-## 参考来源
+- macOS 26.0 或更高版本
+- Xcode 26.0 或更高版本（用于编译）
 
-参考了开源的JavaScript动画库 `click-spark`，非常喜欢其实现效果，因此使用Swift进行了移植。
+首次运行时，如果系统提示权限请求，请前往“系统设置 → 隐私与安全性”，为应用开启所需的辅助功能或输入监控权限。该权限用于接收其他应用中的全局鼠标点击事件。
 
-[参考链接](https://reactbits.dev/animations/click-spark)
+## 🚀 快速开始
 
-## 功能特性
+### 使用 Xcode
 
-- 全局鼠标点击监听
-- 点击位置产生火花特效
-- 可自定义火花颜色、大小、数量等参数
-- 轻量级实现，不影响系统性能
+1. 克隆仓库并进入项目目录：
 
-## 如何使用
+   ```bash
+   git clone https://github.com/hhse/clickBoom.git
+   cd clickBoom
+   ```
 
-1. 克隆项目到本地
-2. 使用Xcode打开项目
-3. 编译并运行
-4. 点击鼠标查看效果
+2. 使用 Xcode 打开 `clickBoom.xcodeproj`。
+3. 选择 `clickBoom` scheme，点击运行。
+4. 在控制面板中打开总开关，选择想要的效果并调整参数。
+5. 在任意应用中点击鼠标，查看点击特效。
 
-## 项目结构
+### 命令行构建
 
-- `clickBoom/` - 主要源代码
-- `clickBoom.xcodeproj/` - Xcode项目文件
+```bash
+xcodebuild \
+  -project clickBoom.xcodeproj \
+  -scheme clickBoom \
+  -configuration Debug \
+  -sdk macosx \
+  build
+```
 
-## 许可证
+## 🎛️ 参数说明
 
-MIT License
+| 参数 | 说明 |
+| --- | --- |
+| 效果颜色 | 设置当前点击动画的颜色 |
+| 数量 | 每次点击生成的粒子数量 |
+| 大小 | 火花、光束或彩纸的基础尺寸 |
+| 半径 | 动画向外扩散的范围 |
+| 持续时间 | 单次点击动画的显示时长 |
+| 缩放 | 整体效果的放大或缩小比例 |
+
+## 🧩 项目结构
+
+```text
+clickBoom/
+├── ContentView.swift       # SwiftUI 控制面板、全局监听和特效渲染
+└── Assets.xcassets/        # 应用图标和颜色资源
+clickBoom.xcodeproj/        # Xcode 工程文件
+```
+
+核心实现集中在 `ContentView.swift`：
+
+- `AppState`：保存开关和特效参数
+- `ClickEffect`：管理可用的特效类型
+- `SparkEngine`：创建和清理点击粒子
+- `SparkOverlayView`：通过 `Canvas` 和 `TimelineView` 绘制动画
+
+## 🔗 开源地址
+
+- GitHub：<https://github.com/hhse/clickBoom>
+- 灵感来源：<https://reactbits.dev/animations/click-spark>
+
+欢迎提交 Issue、建议和 Pull Request，一起完善更多点击效果。
+
+## 📄 许可证
+
+本项目基于 [MIT License](LICENSE) 开源。
