@@ -10,6 +10,10 @@ enum EffectStyle: String, CaseIterable, Identifiable {
     case burst
     case confetti
     case emoji
+    case wave
+    case starflare
+    case pixel
+    case hearts
 
     var id: String { rawValue }
 
@@ -20,6 +24,10 @@ enum EffectStyle: String, CaseIterable, Identifiable {
         case .burst: return "光线"
         case .confetti: return "彩纸"
         case .emoji: return "表情"
+        case .wave: return "水波"
+        case .starflare: return "星芒"
+        case .pixel: return "像素"
+        case .hearts: return "爱心"
         }
     }
 
@@ -30,6 +38,10 @@ enum EffectStyle: String, CaseIterable, Identifiable {
         case .burst: return "line.3.horizontal"
         case .confetti: return "square.grid.2x2"
         case .emoji: return "face.smiling"
+        case .wave: return "water.waves"
+        case .starflare: return "sparkle"
+        case .pixel: return "square.grid.3x3.fill"
+        case .hearts: return "heart.fill"
         }
     }
 }
@@ -139,10 +151,81 @@ class AppState: ObservableObject {
 
 // MARK: - 应用信息
 enum AppInfo {
+    static var shortVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.3"
+    }
+
+    static var buildNumber: String {
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "5"
+    }
+
     static var version: String {
-        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.2"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "3"
-        return "\(short) (\(build))"
+        "\(shortVersion) (\(buildNumber))"
+    }
+}
+
+// MARK: - 检查更新
+@MainActor
+final class UpdateChecker: ObservableObject {
+    enum Status: Equatable {
+        case idle
+        case checking
+        case latest
+        case available(String, URL?)
+        case failed(String)
+    }
+
+    static let shared = UpdateChecker()
+
+    @Published private(set) var status: Status = .idle
+
+    private let latestURL = URL(string: "https://api.github.com/repos/hhse/clickBoom/releases/latest")!
+
+    func check() {
+        guard status != .checking else { return }
+        status = .checking
+
+        var request = URLRequest(url: latestURL)
+        request.timeoutInterval = 15
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, _, error in
+            let result: Status
+            if let data,
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let tag = json["tag_name"] as? String {
+                let remote = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
+                let page = (json["html_url"] as? String).flatMap(URL.init(string:))
+                result = Self.isNewer(remote, than: AppInfo.shortVersion)
+                    ? .available(remote, page)
+                    : .latest
+            } else if let error {
+                result = .failed(error.localizedDescription)
+            } else {
+                result = .failed("无法解析服务器响应")
+            }
+            DispatchQueue.main.async { self?.status = result }
+        }.resume()
+    }
+
+    func openDownloadPage() {
+        if case let .available(_, url) = status, let url {
+            NSWorkspace.shared.open(url)
+        } else {
+            NSWorkspace.shared.open(URL(string: "https://github.com/hhse/clickBoom/releases")!)
+        }
+    }
+
+    /// 逐段比较版本号，缺位补 0
+    nonisolated static func isNewer(_ remote: String, than local: String) -> Bool {
+        let r = remote.split(separator: ".").map { Int($0) ?? 0 }
+        let l = local.split(separator: ".").map { Int($0) ?? 0 }
+        for i in 0..<max(r.count, l.count) {
+            let rv = i < r.count ? r[i] : 0
+            let lv = i < l.count ? l[i] : 0
+            if rv != lv { return rv > lv }
+        }
+        return false
     }
 }
 
@@ -220,11 +303,11 @@ struct ClickBoomApp: App {
     var body: some Scene {
         Window("ClickBoom", id: "control-panel") {
             ControlPanelView()
-                .frame(width: 380, height: 620) // 固定优雅的比例
+                .frame(minWidth: 400, idealWidth: 440, minHeight: 660, idealHeight: 820)
                 .background(VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow))
         }
         .windowStyle(.hiddenTitleBar) // 隐藏原生丑陋的标题栏
-        .windowResizability(.contentSize)
+        .windowResizability(.contentMinSize) // 允许自由拖拽改变大小
 
         MenuBarExtra("ClickBoom", systemImage: "sparkles") {
             MenuBarQuickPanel()
@@ -239,6 +322,7 @@ struct MenuBarQuickPanel: View {
     @StateObject private var appState = AppState.shared
     @StateObject private var loginItem = LaunchAtLogin.shared
     @StateObject private var permission = InputPermission.shared
+    @StateObject private var update = UpdateChecker.shared
 
     private var particleCount: Binding<Double> {
         Binding(
@@ -393,6 +477,29 @@ struct MenuBarQuickPanel: View {
 
             Divider()
 
+            HStack(spacing: 8) {
+                Button {
+                    UpdateChecker.shared.check()
+                } label: {
+                    Label("检查更新", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.plain)
+                .disabled(update.status == .checking)
+
+                Spacer()
+
+                Text(updateStatusText)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+
+                Text("v\(AppInfo.version)")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+            }
+
+            Divider()
+
             Button(role: .destructive) {
                 NSApp.terminate(nil)
             } label: {
@@ -400,17 +507,20 @@ struct MenuBarQuickPanel: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
-
-            HStack {
-                Spacer()
-                Text("v\(AppInfo.version)")
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-            }
         }
-        .padding(16)
-        .frame(width: 320)
+        .padding(18)
+        .frame(width: 360)
         .environment(\.locale, Locale(identifier: "zh-Hans"))
+    }
+
+    private var updateStatusText: String {
+        switch update.status {
+        case .idle: return ""
+        case .checking: return "检查中…"
+        case .latest: return "已是最新"
+        case .available(let version, _): return "有新版本 \(version)"
+        case .failed: return "检查失败"
+        }
     }
 }
 
@@ -444,7 +554,39 @@ struct ControlPanelView: View {
     @StateObject var appState = AppState.shared
     @StateObject private var loginItem = LaunchAtLogin.shared
     @StateObject private var permission = InputPermission.shared
+    @StateObject private var update = UpdateChecker.shared
     
+    @ViewBuilder
+    private var updateStatusRow: some View {
+        switch update.status {
+        case .idle:
+            EmptyView()
+        case .checking:
+            Text("正在检查最新版本…")
+                .font(.system(size: 11))
+                .foregroundColor(.white.opacity(0.45))
+        case .latest:
+            Label("已是最新版本", systemImage: "checkmark.circle.fill")
+                .font(.system(size: 11))
+                .foregroundColor(.green)
+        case .available(let version, _):
+            HStack(spacing: 8) {
+                Label("发现新版本 \(version)", systemImage: "sparkles")
+                    .font(.system(size: 11))
+                    .foregroundColor(.orange)
+                Spacer()
+                Button("前往下载") { update.openDownloadPage() }
+                    .buttonStyle(.link)
+                    .font(.system(size: 11))
+            }
+        case .failed(let message):
+            Text("检查失败：\(message)")
+                .font(.system(size: 11))
+                .foregroundColor(.red.opacity(0.8))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     // 背景渐变
     let bgGradient = LinearGradient(
         gradient: Gradient(colors: [Color(hex: "#1A1A2E")!, Color(hex: "#16213E")!]),
@@ -632,6 +774,26 @@ struct ControlPanelView: View {
                                     .font(.system(size: 12, design: .monospaced))
                                     .foregroundColor(.white.opacity(0.6))
                             }
+
+                            Divider().background(Color.white.opacity(0.1))
+
+                            HStack {
+                                Label("检查更新", systemImage: "arrow.triangle.2.circlepath")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.8))
+                                Spacer()
+                                Button {
+                                    update.check()
+                                } label: {
+                                    Text(update.status == .checking ? "检查中…" : "检查")
+                                        .font(.system(size: 12, weight: .semibold))
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .disabled(update.status == .checking)
+                            }
+
+                            updateStatusRow
                         }
                     }
                     .padding(.horizontal, 20)
@@ -817,8 +979,19 @@ extension Color {
 }
 
 // MARK: - 6. 核心逻辑 (保持不变)
+/// 所有屏幕的并集（全局坐标，原点在主屏左下角）。
+/// 单块透明覆盖层铺满全部屏幕，副屏和竖屏都能落点。
+enum ScreenUnion {
+    static var frame: CGRect {
+        let screens = NSScreen.screens
+        guard let first = screens.first else { return .zero }
+        return screens.dropFirst().reduce(first.frame) { $0.union($1.frame) }
+    }
+}
+
 class AppDelegate: NSObject, NSApplicationDelegate {
-    var overlayWindow: NSWindow!
+    private var overlayWindow: NSWindow?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 显式设置 Dock 图标：老版本图标资源为空，系统会缓存成「白纸」，
         // 启动时用包内 AppIcon.icns 覆盖，确保 Dock 一定显示新图标。
@@ -828,11 +1001,45 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.applicationIconImage = icon
         }
 
-        guard let screen = NSScreen.main else { return }
-        overlayWindow = NSWindow(contentRect: screen.frame, styleMask: [.borderless, .fullSizeContentView], backing: .buffered, defer: false)
-        overlayWindow.isOpaque = false; overlayWindow.backgroundColor = .clear; overlayWindow.hasShadow = false; overlayWindow.level = .screenSaver; overlayWindow.ignoresMouseEvents = true
-        overlayWindow.contentView = NSHostingView(rootView: EffectOverlayView())
-        overlayWindow.makeKeyAndOrderFront(nil)
+        layoutOverlay()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(screenParametersChanged),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+    }
+
+    /// 插拔显示器、改分辨率、调整排列方式时重建覆盖层尺寸
+    @objc private func screenParametersChanged() {
+        layoutOverlay()
+    }
+
+    private func layoutOverlay() {
+        let frame = ScreenUnion.frame
+        guard frame.width > 0, frame.height > 0 else { return }
+
+        if let window = overlayWindow {
+            window.setFrame(frame, display: true)
+            return
+        }
+
+        let window = NSWindow(
+            contentRect: frame,
+            styleMask: [.borderless, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
+        window.level = .screenSaver
+        window.ignoresMouseEvents = true
+        window.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        window.contentView = NSHostingView(rootView: EffectOverlayView())
+        window.setFrame(frame, display: false)
+        window.orderFrontRegardless()
+        overlayWindow = window
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -917,7 +1124,8 @@ struct EffectOverlayView: View {
     @ObservedObject var appState = AppState.shared
     
     var body: some View {
-        TimelineView(.animation) { context in
+        // 没有粒子时暂停时间线，避免空闲状态一直 60fps 重绘（省电）
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: engine.particles.isEmpty)) { context in
             Canvas { ctx, size in
                 let now = context.date
                 let durationSec = appState.durationMs / 1000.0
@@ -946,6 +1154,37 @@ struct EffectOverlayView: View {
         }
         .onAppear { mouseMonitor.start(engine: engine) }
         .onDisappear { mouseMonitor.stop() }
+    }
+
+    /// 以 (0,0) 为中心、边长 size 的爱心路径
+    private func heartPath(size: CGFloat) -> Path {
+        let w = size
+        let h = size
+        let ox = -w / 2
+        let oy = -h / 2
+        var path = Path()
+        path.move(to: CGPoint(x: ox + w * 0.5, y: oy + h * 0.30))
+        path.addCurve(
+            to: CGPoint(x: ox + 0.0, y: oy + h * 0.30),
+            control1: CGPoint(x: ox + w * 0.36, y: oy + h * 0.02),
+            control2: CGPoint(x: ox + 0.0, y: oy + h * 0.04)
+        )
+        path.addCurve(
+            to: CGPoint(x: ox + w * 0.5, y: oy + h * 1.0),
+            control1: CGPoint(x: ox + 0.0, y: oy + h * 0.62),
+            control2: CGPoint(x: ox + w * 0.30, y: oy + h * 0.80)
+        )
+        path.addCurve(
+            to: CGPoint(x: ox + w * 1.0, y: oy + h * 0.30),
+            control1: CGPoint(x: ox + w * 0.70, y: oy + h * 0.80),
+            control2: CGPoint(x: ox + w * 1.0, y: oy + h * 0.62)
+        )
+        path.addCurve(
+            to: CGPoint(x: ox + w * 0.5, y: oy + h * 0.30),
+            control1: CGPoint(x: ox + w * 1.0, y: oy + h * 0.04),
+            control2: CGPoint(x: ox + w * 0.64, y: oy + h * 0.02)
+        )
+        return path
     }
 
     private func drawEffect(
@@ -1039,6 +1278,93 @@ struct EffectOverlayView: View {
             piece.closeSubpath()
             context.fill(piece, with: .color(color.opacity(fade)))
 
+        case .wave:
+            // 三条环依次向外扩散；只让 0 号粒子负责画，避免多圈重叠成一团
+            if particle.variation < 0.001 {
+                let maxRadius = radius * scale * particle.intensity
+                for index in 0..<3 {
+                    let phase = (progress + Double(index) / 3.0)
+                        .truncatingRemainder(dividingBy: 1.0)
+                    let ringRadius = maxRadius * (0.10 + 0.95 * phase)
+                    var wave = Path()
+                    wave.addEllipse(in: CGRect(
+                        x: particle.x - ringRadius,
+                        y: particle.y - ringRadius,
+                        width: ringRadius * 2,
+                        height: ringRadius * 2
+                    ))
+                    context.stroke(
+                        wave,
+                        with: .color(color.opacity((1 - phase) * 0.68)),
+                        lineWidth: max(1.5, boostedSize * 0.22) * (1 - phase * 0.45)
+                    )
+                }
+            }
+
+        case .starflare:
+            // 尖细星芒：中心宽、尖端收拢的三角，外加一个只画一次的核心高光
+            let flareLength = radius * scale * particle.intensity
+                * (0.55 + particle.variation * 0.75)
+                * (0.35 + eased * 0.85)
+            let baseWidth = boostedSize * 0.24 * (1 - eased * 0.2)
+            let normalX = -sinA
+            let normalY = cosA
+            let tip = CGPoint(
+                x: particle.x + flareLength * cosA,
+                y: particle.y + flareLength * sinA
+            )
+            var spike = Path()
+            spike.move(to: CGPoint(x: particle.x + normalX * baseWidth,
+                                   y: particle.y + normalY * baseWidth))
+            spike.addLine(to: tip)
+            spike.addLine(to: CGPoint(x: particle.x - normalX * baseWidth,
+                                      y: particle.y - normalY * baseWidth))
+            spike.closeSubpath()
+            context.fill(spike, with: .color(color.opacity(fade)))
+
+            if particle.variation < 0.001 {
+                let coreRadius = max(2, boostedSize * 0.85) * (0.75 + 0.25 * eased)
+                var core = Path()
+                core.addEllipse(in: CGRect(
+                    x: particle.x - coreRadius,
+                    y: particle.y - coreRadius,
+                    width: coreRadius * 2,
+                    height: coreRadius * 2
+                ))
+                context.fill(core, with: .color(color.opacity(fade * 0.95)))
+            }
+
+        case .pixel:
+            // 8-bit 小方块：边飞边旋转、边缩小
+            let travel = eased * radius * scale * particle.intensity
+                * (0.35 + particle.variation * 0.95)
+            let side = max(2.5, boostedSize * (0.65 + particle.variation * 0.55) * (1 - eased * 0.25))
+            var pixelContext = context
+            pixelContext.translateBy(
+                x: particle.x + travel * cosA,
+                y: particle.y + travel * sinA
+            )
+            pixelContext.rotate(by: .radians(progress * 3.2 + particle.variation * 6.3))
+            let square = Path(CGRect(x: -side / 2, y: -side / 2, width: side, height: side))
+            pixelContext.fill(square, with: .color(color.opacity(fade)))
+
+        case .hearts:
+            // 爱心上浮 + 轻微摇摆旋转，按 variation 错峰起飞避免一开始挤成一坨
+            let localP = min(1, progress * 1.12 + particle.variation * 0.10)
+            let easedHeart = localP * (2 - localP)
+            let spread = radius * scale * particle.intensity
+            let lift = easedHeart * spread * 1.8
+            let sway = sin(localP * .pi * 2.4 + particle.variation * 4) * spread * 0.22
+            let heartX = particle.x + cosA * spread * 1.05 * easedHeart + sway
+            let heartY = particle.y + sinA * spread * 0.28 * easedHeart - lift
+                - particle.variation * boostedSize * 0.9
+            let heartSize = max(9, boostedSize * 2.2 * (0.70 + 0.40 * (1 - easedHeart)))
+            var heartContext = context
+            heartContext.opacity = fade * 0.95
+            heartContext.translateBy(x: heartX, y: heartY)
+            heartContext.rotate(by: .radians(sin(localP * .pi * 1.6 + particle.variation * 3) * 0.32))
+            heartContext.fill(heartPath(size: heartSize), with: .color(color))
+
         case .emoji:
             let popProgress = min(1, progress / 0.2)
             let popEase = 1 - pow(1 - popProgress, 3)
@@ -1069,21 +1395,27 @@ final class GlobalMouseMonitor: ObservableObject {
     private var globalMonitor: Any?
     private var localMonitor: Any?
 
+    /// 全局坐标（左下原点）→ 覆盖层视图坐标（左上原点，覆盖全部屏幕）
+    private static func overlayPoint() -> CGPoint? {
+        let union = ScreenUnion.frame
+        guard union.height > 0 else { return nil }
+        let location = NSEvent.mouseLocation
+        return CGPoint(x: location.x - union.minX, y: union.maxY - location.y)
+    }
+
     func start(engine: EffectEngine) {
         guard globalMonitor == nil, localMonitor == nil else { return }
 
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak engine] _ in
             DispatchQueue.main.async {
-                guard let height = NSScreen.main?.frame.height else { return }
-                let location = NSEvent.mouseLocation
-                engine?.trigger(at: CGPoint(x: location.x, y: height - location.y))
+                guard let point = Self.overlayPoint() else { return }
+                engine?.trigger(at: point)
             }
         }
 
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak engine] event in
-            if let height = NSScreen.main?.frame.height {
-                let location = NSEvent.mouseLocation
-                engine?.trigger(at: CGPoint(x: location.x, y: height - location.y))
+            if let point = Self.overlayPoint() {
+                engine?.trigger(at: point)
             }
             return event
         }
