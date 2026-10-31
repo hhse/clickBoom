@@ -2,79 +2,82 @@ import SwiftUI
 import Combine
 
 // MARK: - 点击效果样式
-enum ClickEffect: String, CaseIterable, Identifiable {
+enum EffectStyle: String, CaseIterable, Identifiable {
     case spark
     case ripple
     case burst
+    case confetti
+    case emoji
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .spark: return "火花"
+        case .ripple: return "圆环"
+        case .burst: return "光线"
+        case .confetti: return "彩纸"
+        case .emoji: return "表情"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .spark: return "sparkles"
+        case .ripple: return "circle.dotted"
+        case .burst: return "line.3.horizontal"
+        case .confetti: return "square.grid.2x2"
+        case .emoji: return "face.smiling"
+        }
+    }
+}
+
+enum EffectPreset: String, CaseIterable, Identifiable {
+    case standard
+    case blue
+    case ring
     case confetti
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .spark: return "放射火花"
-        case .ripple: return "扩散波纹"
-        case .burst: return "霓虹爆发"
-        case .confetti: return "彩纸喷射"
+        case .standard: return "默认"
+        case .blue: return "蓝光"
+        case .ring: return "圆环"
+        case .confetti: return "彩纸"
         }
     }
 
     var icon: String {
         switch self {
-        case .spark: return "wand.and.stars"
-        case .ripple: return "circle.dotted"
-        case .burst: return "sun.max.fill"
-        case .confetti: return "party.popper.fill"
-        }
-    }
-}
-
-enum ClickPreset: String, CaseIterable, Identifiable {
-    case gentle
-    case neon
-    case ripple
-    case party
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .gentle: return "轻盈"
-        case .neon: return "霓虹"
-        case .ripple: return "水波"
-        case .party: return "派对"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .gentle: return "wind"
-        case .neon: return "bolt.fill"
-        case .ripple: return "water.waves"
-        case .party: return "party.popper.fill"
+        case .standard: return "sparkles"
+        case .blue: return "circle.fill"
+        case .ring: return "circle.dotted"
+        case .confetti: return "square.grid.2x2"
         }
     }
 
     var settings: Settings {
         switch self {
-        case .gentle:
-            return Settings(effect: .spark, color: "#FFFFFF", count: 7, size: 8, radius: 18, duration: 320, scale: 0.9)
-        case .neon:
-            return Settings(effect: .burst, color: "#66E8FF", count: 12, size: 14, radius: 32, duration: 520, scale: 1.35)
-        case .ripple:
-            return Settings(effect: .ripple, color: "#63F2CE", count: 8, size: 15, radius: 62, duration: 850, scale: 1.15)
-        case .party:
-            return Settings(effect: .confetti, color: "#FF77C8", count: 18, size: 16, radius: 72, duration: 1200, scale: 1.45)
+        case .standard:
+            return Settings(effect: .spark, color: "#FFFFFF", count: 6, size: 6, radius: 12, durationMs: 280, scale: 0.85)
+        case .blue:
+            return Settings(effect: .burst, color: "#66E8FF", count: 7, size: 7, radius: 18, durationMs: 360, scale: 0.9)
+        case .ring:
+            return Settings(effect: .ripple, color: "#63F2CE", count: 6, size: 7, radius: 24, durationMs: 480, scale: 0.85)
+        case .confetti:
+            return Settings(effect: .confetti, color: "#FF77C8", count: 7, size: 6, radius: 20, durationMs: 520, scale: 0.9)
         }
     }
 
     struct Settings {
-        let effect: ClickEffect
+        let effect: EffectStyle
         let color: String
         let count: Int
         let size: Double
         let radius: Double
-        let duration: Double
+        let durationMs: Double
         let scale: Double
     }
 }
@@ -84,50 +87,61 @@ class AppState: ObservableObject {
     static let shared = AppState()
     
     @AppStorage("isEnabled") var isEnabled: Bool = true
-    @AppStorage("sparkColorHex") var sparkColorHex: String = "#FFFFFF"
-    @AppStorage("sparkSize") var sparkSize: Double = 10.0
-    @AppStorage("sparkRadius") var sparkRadius: Double = 15.0
-    @AppStorage("sparkCount") var sparkCount: Int = 8
-    @AppStorage("duration") var duration: Double = 400.0
-    @AppStorage("extraScale") var extraScale: Double = 1.0
-    @AppStorage("effectStyle") var effectStyleRaw: String = ClickEffect.spark.rawValue
+    @AppStorage("sparkColorHex") var effectColorHex: String = "#FFFFFF"
+    @AppStorage("sparkSize") var particleSize: Double = 10.0
+    @AppStorage("sparkRadius") var particleRadius: Double = 15.0
+    @AppStorage("sparkCount") var particleCount: Int = 8
+    @AppStorage("duration") var durationMs: Double = 400.0
+    @AppStorage("extraScale") var scale: Double = 1.0
+    @AppStorage("effectStyle") var effectStyleRaw: String = EffectStyle.spark.rawValue
     @AppStorage("randomEffectEnabled") var randomEffectEnabled: Bool = false
     @AppStorage("comboBoostEnabled") var comboBoostEnabled: Bool = false
+    @AppStorage("customEmoji") var customEmoji: String = "✨"
     @Published var comboCount: Int = 0
 
-    var effectStyle: Binding<ClickEffect> {
+    var effectStyle: Binding<EffectStyle> {
         Binding(
-            get: { ClickEffect(rawValue: self.effectStyleRaw) ?? .spark },
+            get: { EffectStyle(rawValue: self.effectStyleRaw) ?? .spark },
             set: { self.effectStyleRaw = $0.rawValue }
         )
     }
 
-    var sparkColor: Binding<Color> {
+    var effectColor: Binding<Color> {
         Binding(
-            get: { Color(hex: self.sparkColorHex) ?? .white },
-            set: { self.sparkColorHex = $0.toHex() ?? "#FFFFFF" }
+            get: { Color(hex: self.effectColorHex) ?? .white },
+            set: { self.effectColorHex = $0.toHex() ?? "#FFFFFF" }
         )
     }
 
-    func apply(_ preset: ClickPreset) {
+    var emojiChoices: [String] {
+        let choices = customEmoji
+            .map(String.init)
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        return choices.isEmpty ? ["✨"] : choices
+    }
+
+    func apply(_ preset: EffectPreset) {
         let settings = preset.settings
         effectStyleRaw = settings.effect.rawValue
-        sparkColorHex = settings.color
-        sparkCount = settings.count
-        sparkSize = settings.size
-        sparkRadius = settings.radius
-        duration = settings.duration
-        extraScale = settings.scale
+        effectColorHex = settings.color
+        particleCount = settings.count
+        particleSize = settings.size
+        particleRadius = settings.radius
+        durationMs = settings.durationMs
+        scale = settings.scale
+        randomEffectEnabled = false
+        comboBoostEnabled = false
+        comboCount = 0
     }
 }
 
 // MARK: - 2. 程序入口
 @main
-struct ClickSparkApp: App {
+struct ClickBoomApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
     var body: some Scene {
-        Window("Click Spark", id: "control-panel") {
+        Window("ClickBoom", id: "control-panel") {
             ControlPanelView()
                 .frame(width: 380, height: 620) // 固定优雅的比例
                 .background(VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow))
@@ -149,8 +163,8 @@ struct MenuBarQuickPanel: View {
 
     private var particleCount: Binding<Double> {
         Binding(
-            get: { Double(appState.sparkCount) },
-            set: { appState.sparkCount = Int($0) }
+            get: { Double(appState.particleCount) },
+            set: { appState.particleCount = Int($0) }
         )
     }
 
@@ -177,7 +191,7 @@ struct MenuBarQuickPanel: View {
             Divider()
 
             Menu {
-                ForEach(ClickPreset.allCases) { preset in
+                ForEach(EffectPreset.allCases) { preset in
                     Button {
                         appState.apply(preset)
                     } label: {
@@ -185,17 +199,21 @@ struct MenuBarQuickPanel: View {
                     }
                 }
             } label: {
-                Label("应用效果预设", systemImage: "wand.and.stars")
+                Label("预设", systemImage: "slider.horizontal.3")
             }
 
             Picker("效果", selection: appState.effectStyle) {
-                ForEach(ClickEffect.allCases) { effect in
+                ForEach(EffectStyle.allCases) { effect in
                     Label(effect.title, systemImage: effect.icon)
                         .tag(effect)
                 }
             }
 
-            ColorPicker("效果颜色", selection: appState.sparkColor, supportsOpacity: false)
+            TextField("自定义 Emoji", text: $appState.customEmoji)
+                .textFieldStyle(.roundedBorder)
+                .help("输入一个或多个 Emoji，点击时会随机弹出")
+
+            ColorPicker("效果颜色", selection: appState.effectColor, supportsOpacity: false)
 
             QuickSlider(
                 label: "粒子数量",
@@ -206,35 +224,35 @@ struct MenuBarQuickPanel: View {
             )
             QuickSlider(
                 label: "粒子大小",
-                value: $appState.sparkSize,
+                value: $appState.particleSize,
                 range: 1...30,
                 step: 1,
                 format: "%.0f 像素"
             )
             QuickSlider(
                 label: "动画时长",
-                value: $appState.duration,
+                value: $appState.durationMs,
                 range: 100...2000,
                 step: 50,
                 format: "%.0f 毫秒"
             )
             QuickSlider(
                 label: "扩散半径",
-                value: $appState.sparkRadius,
+                value: $appState.particleRadius,
                 range: 5...100,
                 step: 5,
                 format: "%.0f 像素"
             )
             QuickSlider(
                 label: "缩放比例",
-                value: $appState.extraScale,
+                value: $appState.scale,
                 range: 0.5...5.0,
                 step: 0.1,
                 format: "%.1f 倍"
             )
 
-            Toggle("随机效果", isOn: $appState.randomEffectEnabled)
-            Toggle("连击增强", isOn: $appState.comboBoostEnabled)
+            Toggle("随机样式", isOn: $appState.randomEffectEnabled)
+            Toggle("连续点击放大", isOn: $appState.comboBoostEnabled)
             if appState.comboBoostEnabled, appState.comboCount > 1 {
                 Label("连击 ×\(appState.comboCount)", systemImage: "flame.fill")
                     .font(.system(size: 11, weight: .semibold))
@@ -317,7 +335,7 @@ struct ControlPanelView: View {
                 // --- 顶部标题栏 ---
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Click Spark")
+                        Text("ClickBoom")
                             .font(.system(size: 24, weight: .heavy, design: .rounded))
                             .foregroundColor(.white)
                         Text("全局鼠标点击特效")
@@ -346,7 +364,7 @@ struct ControlPanelView: View {
                                     .font(.system(size: 13, weight: .medium))
                                     .foregroundColor(.white.opacity(0.8))
                                 Spacer()
-                                ColorPicker("", selection: appState.sparkColor)
+                                ColorPicker("", selection: appState.effectColor)
                                     .labelsHidden()
                             }
 
@@ -358,7 +376,7 @@ struct ControlPanelView: View {
                                     .foregroundColor(.white.opacity(0.8))
                                 Spacer()
                                 Picker("效果", selection: appState.effectStyle) {
-                                    ForEach(ClickEffect.allCases) { effect in
+                                    ForEach(EffectStyle.allCases) { effect in
                                         Text(effect.title).tag(effect)
                                     }
                                 }
@@ -367,11 +385,22 @@ struct ControlPanelView: View {
                                 .tint(.white)
                                 .frame(width: 120, alignment: .trailing)
                             }
+
+                            if appState.effectStyle.wrappedValue == .emoji {
+                                HStack(spacing: 10) {
+                                    Label("自定义 Emoji", systemImage: "face.smiling")
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.8))
+                                    TextField("例如：✨🔥💖", text: $appState.customEmoji)
+                                        .textFieldStyle(.roundedBorder)
+                                        .frame(width: 130)
+                                }
+                            }
                         }
 
-                        SectionCard(icon: "wand.and.stars", title: "快捷预设") {
+                        SectionCard(icon: "slider.horizontal.3", title: "预设") {
                             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                                ForEach(ClickPreset.allCases) { preset in
+                                ForEach(EffectPreset.allCases) { preset in
                                     PresetButton(preset: preset) {
                                         appState.apply(preset)
                                     }
@@ -381,22 +410,22 @@ struct ControlPanelView: View {
                         
                         // 粒子属性卡片
                         SectionCard(icon: "sparkles", title: "粒子") {
-                            ModernSlider(label: "数量", value: Binding(get: { Double(appState.sparkCount) }, set: { appState.sparkCount = Int($0) }), range: 3...20, icon: "burst.fill", format: "%.0f")
+                            ModernSlider(label: "数量", value: Binding(get: { Double(appState.particleCount) }, set: { appState.particleCount = Int($0) }), range: 3...20, icon: "burst.fill", format: "%.0f")
                             Divider().background(Color.white.opacity(0.1))
-                            ModernSlider(label: "大小", value: $appState.sparkSize, range: 1...30, icon: "smallcircle.filled.circle", format: "%.0f 像素")
+                            ModernSlider(label: "大小", value: $appState.particleSize, range: 1...30, icon: "smallcircle.filled.circle", format: "%.0f 像素")
                             Divider().background(Color.white.opacity(0.1))
-                            ModernSlider(label: "半径", value: $appState.sparkRadius, range: 5...100, icon: "circle.circle", format: "%.0f 像素")
+                            ModernSlider(label: "半径", value: $appState.particleRadius, range: 5...100, icon: "circle.circle", format: "%.0f 像素")
                         }
                         
                         // 动画属性卡片
                         SectionCard(icon: "timer", title: "动画") {
-                            ModernSlider(label: "持续时间", value: $appState.duration, range: 100...2000, icon: "clock.fill", format: "%.0f 毫秒")
+                            ModernSlider(label: "持续时间", value: $appState.durationMs, range: 100...2000, icon: "clock.fill", format: "%.0f 毫秒")
                             Divider().background(Color.white.opacity(0.1))
-                            ModernSlider(label: "缩放", value: $appState.extraScale, range: 0.5...5.0, icon: "arrow.up.left.and.arrow.down.right", format: "%.1f 倍")
+                            ModernSlider(label: "缩放", value: $appState.scale, range: 0.5...5.0, icon: "arrow.up.left.and.arrow.down.right", format: "%.1f 倍")
                         }
 
-                        SectionCard(icon: "bolt.horizontal.circle.fill", title: "智能模式") {
-                            Toggle("随机效果", isOn: $appState.randomEffectEnabled)
+                        SectionCard(icon: "gearshape", title: "选项") {
+                            Toggle("随机样式", isOn: $appState.randomEffectEnabled)
                                 .toggleStyle(.switch)
                                 .tint(.cyan)
                             Text("每次点击自动抽取一种效果")
@@ -405,7 +434,7 @@ struct ControlPanelView: View {
 
                             Divider().background(Color.white.opacity(0.1))
 
-                            Toggle("连击增强", isOn: $appState.comboBoostEnabled)
+                            Toggle("连续点击放大", isOn: $appState.comboBoostEnabled)
                                 .toggleStyle(.switch)
                                 .tint(.orange)
                             Text("短时间连续点击会逐步放大效果")
@@ -511,7 +540,7 @@ struct ModernSlider: View {
 }
 
 struct PresetButton: View {
-    let preset: ClickPreset
+    let preset: EffectPreset
     let action: () -> Void
 
     var body: some View {
@@ -607,22 +636,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let screen = NSScreen.main else { return }
         overlayWindow = NSWindow(contentRect: screen.frame, styleMask: [.borderless, .fullSizeContentView], backing: .buffered, defer: false)
         overlayWindow.isOpaque = false; overlayWindow.backgroundColor = .clear; overlayWindow.hasShadow = false; overlayWindow.level = .screenSaver; overlayWindow.ignoresMouseEvents = true
-        overlayWindow.contentView = NSHostingView(rootView: SparkOverlayView())
+        overlayWindow.contentView = NSHostingView(rootView: EffectOverlayView())
         overlayWindow.makeKeyAndOrderFront(nil)
     }
 }
 
-struct Spark: Identifiable {
+struct Particle: Identifiable {
     let id = UUID()
     var x, y, angle: Double
     var startTime: Date
     var variation: Double
-    var effect: ClickEffect
+    var effect: EffectStyle
     var intensity: Double
+    var emoji: String
 }
 
-class SparkEngine: ObservableObject {
-    @Published var sparks: [Spark] = []
+class EffectEngine: ObservableObject {
+    @Published var particles: [Particle] = []
     private var lastClickTime = Date.distantPast
     private var comboLevel = 0
 
@@ -647,37 +677,41 @@ class SparkEngine: ObservableObject {
         }
 
         let intensity = state.comboBoostEnabled
-            ? min(1 + Double(max(comboLevel - 1, 0)) * 0.12, 1.84)
+            ? min(1 + Double(max(comboLevel - 1, 0)) * 0.08, 1.4)
             : 1.0
-        let count = min(60, Int((Double(state.sparkCount) * intensity).rounded()))
         let effect = state.randomEffectEnabled
-            ? ClickEffect.allCases.randomElement() ?? .spark
+            ? EffectStyle.allCases.randomElement() ?? .spark
             : state.effectStyle.wrappedValue
-        var newSparks: [Spark] = []
+        let count = effect == .emoji
+            ? 1
+            : min(32, Int((Double(state.particleCount) * intensity).rounded()))
+        let emoji = effect == .emoji ? (state.emojiChoices.randomElement() ?? "✨") : ""
+        var newParticles: [Particle] = []
         for i in 0..<count {
             let angle = (2 * .pi * Double(i)) / Double(count)
             // 用稳定的变化值让同一组粒子形状有轻微差异，避免每次都像复制出来的。
             let variation = Double((i * 37) % 100) / 100
-            newSparks.append(Spark(
+            newParticles.append(Particle(
                 x: point.x,
                 y: point.y,
                 angle: angle,
                 startTime: now,
                 variation: variation,
                 effect: effect,
-                intensity: intensity
+                intensity: intensity,
+                emoji: emoji
             ))
         }
-        sparks.append(contentsOf: newSparks)
+        particles.append(contentsOf: newParticles)
     }
     func cleanUp(currentTime: Date) {
-        let durationSec = AppState.shared.duration / 1000.0
-        sparks = sparks.filter { currentTime.timeIntervalSince($0.startTime) < durationSec }
+        let durationSec = AppState.shared.durationMs / 1000.0
+        particles = particles.filter { currentTime.timeIntervalSince($0.startTime) < durationSec }
     }
 }
 
-struct SparkOverlayView: View {
-    @StateObject var engine = SparkEngine()
+struct EffectOverlayView: View {
+    @StateObject var engine = EffectEngine()
     @StateObject private var mouseMonitor = GlobalMouseMonitor()
     @ObservedObject var appState = AppState.shared
     
@@ -685,19 +719,19 @@ struct SparkOverlayView: View {
         TimelineView(.animation) { context in
             Canvas { ctx, size in
                 let now = context.date
-                let durationSec = appState.duration / 1000.0
-                let color = appState.sparkColor.wrappedValue
-                let sizeVal = appState.sparkSize
-                let radius = appState.sparkRadius
-                let scale = appState.extraScale
+                let durationSec = appState.durationMs / 1000.0
+                let color = appState.effectColor.wrappedValue
+                let sizeVal = appState.particleSize
+                let radius = appState.particleRadius
+                let scale = appState.scale
                 
-                for spark in engine.sparks {
-                    let elapsed = now.timeIntervalSince(spark.startTime)
+                for particle in engine.particles {
+                    let elapsed = now.timeIntervalSince(particle.startTime)
                     if elapsed >= durationSec { continue }
                     let progress = elapsed / durationSec
                     drawEffect(
-                        spark.effect,
-                        spark: spark,
+                        particle.effect,
+                        particle: particle,
                         progress: progress,
                         color: color,
                         size: sizeVal,
@@ -714,8 +748,8 @@ struct SparkOverlayView: View {
     }
 
     private func drawEffect(
-        _ effect: ClickEffect,
-        spark: Spark,
+        _ effect: EffectStyle,
+        particle: Particle,
         progress: Double,
         color: Color,
         size: Double,
@@ -724,54 +758,61 @@ struct SparkOverlayView: View {
         context: GraphicsContext
     ) {
         let eased = progress * (2 - progress)
-        let cosA = cos(spark.angle)
-        let sinA = sin(spark.angle)
-        let boostedSize = size * spark.intensity
-        let distance = eased * radius * scale * spark.intensity
+        let cosA = cos(particle.angle)
+        let sinA = sin(particle.angle)
+        let boostedSize = size * particle.intensity
+        let distance = eased * radius * scale * particle.intensity
         let fade = max(0, 1 - progress)
 
         switch effect {
         case .spark:
             let length = boostedSize * (1 - eased)
             var path = Path()
-            path.move(to: CGPoint(x: spark.x + distance * cosA, y: spark.y + distance * sinA))
-            path.addLine(to: CGPoint(x: spark.x + (distance + length) * cosA, y: spark.y + (distance + length) * sinA))
+            path.move(to: CGPoint(x: particle.x + distance * cosA, y: particle.y + distance * sinA))
+            path.addLine(to: CGPoint(x: particle.x + (distance + length) * cosA, y: particle.y + (distance + length) * sinA))
             context.stroke(path, with: .color(color.opacity(fade)), lineWidth: 2.5)
 
         case .ripple:
-            let expandedRadius = radius * scale * spark.intensity
-            let ringRadius = (expandedRadius * 0.15) + (expandedRadius * 0.85 * eased) + spark.variation * expandedRadius * 0.3
-            let ringRect = CGRect(
-                x: spark.x - ringRadius,
-                y: spark.y - ringRadius,
-                width: ringRadius * 2,
-                height: ringRadius * 2
-            )
+            let expandedRadius = radius * scale * particle.intensity
+            let ringRadius = (expandedRadius * 0.15) + (expandedRadius * 0.85 * eased) + particle.variation * expandedRadius * 0.3
             var ring = Path()
-            ring.addEllipse(in: ringRect)
-            context.stroke(ring, with: .color(color.opacity(fade * 0.7)), lineWidth: max(1.5, boostedSize * 0.18))
+            let arcSize = 0.32 + particle.variation * 0.18
+            ring.addArc(
+                center: CGPoint(x: particle.x, y: particle.y),
+                radius: ringRadius,
+                startAngle: .radians(particle.angle - arcSize),
+                endAngle: .radians(particle.angle + arcSize),
+                clockwise: false
+            )
+            context.stroke(
+                ring,
+                with: .color(color.opacity(fade * 0.75)),
+                style: StrokeStyle(lineWidth: max(1.25, boostedSize * 0.16), lineCap: .round)
+            )
 
         case .burst:
             let rayLength = boostedSize * (1.2 - eased * 0.8)
             var ray = Path()
-            ray.move(to: CGPoint(x: spark.x + distance * 0.35 * cosA, y: spark.y + distance * 0.35 * sinA))
-            ray.addLine(to: CGPoint(x: spark.x + (distance + rayLength) * cosA, y: spark.y + (distance + rayLength) * sinA))
+            ray.move(to: CGPoint(x: particle.x + distance * 0.35 * cosA, y: particle.y + distance * 0.35 * sinA))
+            ray.addLine(to: CGPoint(x: particle.x + (distance + rayLength) * cosA, y: particle.y + (distance + rayLength) * sinA))
             context.stroke(ray, with: .color(color.opacity(fade)), lineWidth: max(2, boostedSize * 0.22))
 
-            let dotRadius = max(2, boostedSize * 0.28 * fade)
-            var dot = Path()
-            dot.addEllipse(in: CGRect(x: spark.x - dotRadius, y: spark.y - dotRadius, width: dotRadius * 2, height: dotRadius * 2))
-            context.fill(dot, with: .color(color.opacity(fade * 0.9)))
+            if particle.variation < 0.05 {
+                let dotRadius = max(1.5, boostedSize * 0.2 * fade)
+                var dot = Path()
+                dot.addEllipse(in: CGRect(x: particle.x - dotRadius, y: particle.y - dotRadius, width: dotRadius * 2, height: dotRadius * 2))
+                context.fill(dot, with: .color(color.opacity(fade * 0.85)))
+            }
 
         case .confetti:
-            let fall = eased * radius * scale * spark.intensity * 1.35
+            let fall = eased * radius * scale * particle.intensity * 1.35
             let drift = distance * 0.45
             let center = CGPoint(
-                x: spark.x + drift * cosA,
-                y: spark.y + drift * sinA + fall
+                x: particle.x + drift * cosA,
+                y: particle.y + drift * sinA + fall
             )
-            let pieceSize = max(3, boostedSize * (0.55 + spark.variation * 0.55) * (1 - eased * 0.25))
-            let rotation = spark.angle + progress * (.pi * 1.5) + spark.variation
+            let pieceSize = max(3, boostedSize * (0.55 + particle.variation * 0.55) * (1 - eased * 0.25))
+            let rotation = particle.angle + progress * (.pi * 1.5) + particle.variation
             let halfWidth = pieceSize * 0.55
             let halfHeight = pieceSize * 0.3
             let cosR = cos(rotation)
@@ -796,6 +837,28 @@ struct SparkOverlayView: View {
             corners.dropFirst().forEach { piece.addLine(to: $0) }
             piece.closeSubpath()
             context.fill(piece, with: .color(color.opacity(fade)))
+
+        case .emoji:
+            let popProgress = min(1, progress / 0.2)
+            let popEase = 1 - pow(1 - popProgress, 3)
+            let lift = eased * radius * scale * 0.65
+            let sway = sin(progress * .pi * 2.2 + particle.variation * 5) * size * 0.35 * fade
+            let emojiScale = max(0.01, (0.45 + popEase * 0.55) * particle.intensity)
+            let rotation = sin(progress * .pi * 1.4 + particle.variation * 3) * 0.16
+            var emojiContext = context
+            emojiContext.opacity = fade
+            emojiContext.translateBy(
+                x: particle.x + sway,
+                y: particle.y - lift - particle.variation * size * 0.25
+            )
+            emojiContext.rotate(by: .radians(rotation))
+            emojiContext.scaleBy(x: emojiScale, y: emojiScale)
+            emojiContext.draw(
+                Text(particle.emoji)
+                    .font(.system(size: max(18, size * 2.2), weight: .regular)),
+                at: .zero,
+                anchor: .center
+            )
         }
     }
 }
@@ -805,7 +868,7 @@ final class GlobalMouseMonitor: ObservableObject {
     private var globalMonitor: Any?
     private var localMonitor: Any?
 
-    func start(engine: SparkEngine) {
+    func start(engine: EffectEngine) {
         guard globalMonitor == nil, localMonitor == nil else { return }
 
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak engine] _ in
