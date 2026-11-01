@@ -99,3 +99,25 @@ if [[ "${SKIP_SIGN:-0}" == "1" ]]; then
 elif [[ -z "${NOTARY_PROFILE:-}" ]]; then
   echo "    提示：当前未做公证，别人下载后会被 Gatekeeper 拦一次（见 README「首次打开」）。"
 fi
+
+# 可选：顺手传到 GitHub Release（PUBLISH=1，需要 gh 已登录）
+if [[ "${PUBLISH:-0}" == "1" ]]; then
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "错误：PUBLISH=1 需要 GitHub CLI，先 brew install gh" >&2
+    exit 1
+  fi
+  TAG="v$VERSION"
+  echo "==> 发布到 GitHub Release：$TAG"
+  if ! git ls-remote --tags --exit-code origin "$TAG" >/dev/null 2>&1; then
+    echo "    提示：远端还没有 $TAG，gh 会按当前分支 HEAD 创建标签。"
+  fi
+  if ! gh release view "$TAG" >/dev/null 2>&1; then
+    if [[ -n "${NOTES_FILE:-}" ]]; then
+      gh release create "$TAG" --title "$APP_NAME $VERSION" --notes-file "$NOTES_FILE"
+    else
+      gh release create "$TAG" --title "$APP_NAME $VERSION" --generate-notes
+    fi
+  fi
+  gh release upload "$TAG" "$OUT_DMG" --clobber
+  echo "==> 已发布：https://github.com/hhse/clickBoom/releases/tag/$TAG"
+fi

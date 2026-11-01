@@ -1,0 +1,64 @@
+name: Release
+
+# 推 tag（v1.2.3）时自动构建通用 DMG 并补到 Release；
+# 也可以在 Actions 页面手动触发，只产出 workflow artifact。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  dmg:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 选用最新的 Xcode
+        run: |
+          set -euo pipefail
+          latest=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          echo "使用 $latest"
+          sudo xcode-select -s "$latest/Contents/Developer"
+
+      - name: 检查 macOS SDK
+        run: |
+          set -euo pipefail
+          sdk=$(xcrun --sdk macosx --show-sdk-version)
+          echo "macOS SDK: $sdk"
+          major=${sdk%%.*}
+          if [ "$major" -lt 26 ]; then
+            echo "::error::当前 runner 的 SDK 是 $sdk，项目需要 26.0。请换用带 Xcode 26 的 runner，或本地执行 ./scripts/release.sh。"
+            exit 1
+          fi
+
+      - name: 构建 DMG（未签名）
+        env:
+          SKIP_SIGN: "1"
+        run: ./scripts/release.sh
+
+      - name: 上传 workflow artifact
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClickBoom-dmg
+          path: dist/*.dmg
+
+      # 只在还没有 DMG 附件时补上去：本地签名的包优先级更高，不会被 CI 的未签名包覆盖
+      - name: 补到 GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --title "ClickBoom ${tag#v}" --generate-notes
+          fi
+          if gh release view "$tag" --json assets --jq '.assets[].name' | grep -qE '^ClickBoom-.*\.dmg$'; then
+            echo "Release $tag 已经有 DMG 附件，跳过上传（保留本地签名版本）"
+          else
+            gh release upload "$tag" dist/ClickBoom-*.dmg
+          fi

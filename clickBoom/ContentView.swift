@@ -111,6 +111,7 @@ class AppState: ObservableObject {
     @AppStorage("randomEffectEnabled") var randomEffectEnabled: Bool = false
     @AppStorage("comboBoostEnabled") var comboBoostEnabled: Bool = false
     @AppStorage("customEmoji") var customEmoji: String = "✨"
+    @AppStorage("rightClickEnabled") var rightClickEnabled: Bool = true
     @Published var comboCount: Int = 0
 
     var effectStyle: Binding<EffectStyle> {
@@ -147,16 +148,32 @@ class AppState: ObservableObject {
         comboBoostEnabled = false
         comboCount = 0
     }
+
+    /// 恢复默认值：只重置效果参数和选项，不动「启用」开关。
+    func resetToDefaults() {
+        effectColorHex = "#FFFFFF"
+        particleSize = 10
+        particleRadius = 15
+        particleCount = 8
+        durationMs = 400
+        scale = 1.0
+        effectStyleRaw = EffectStyle.spark.rawValue
+        randomEffectEnabled = false
+        comboBoostEnabled = false
+        customEmoji = "✨"
+        rightClickEnabled = true
+        comboCount = 0
+    }
 }
 
 // MARK: - 应用信息
 enum AppInfo {
     static var shortVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.4"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.5"
     }
 
     static var buildNumber: String {
-        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "6"
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "7"
     }
 
     static var version: String {
@@ -295,6 +312,31 @@ final class InputPermission: ObservableObject {
     }
 }
 
+// MARK: - 系统无障碍设置
+/// 跟随「减弱动态效果」：打开时把旋转、摇摆这类大幅位移收起来，动画更克制。
+@MainActor
+final class AccessibilitySettings: ObservableObject {
+    static let shared = AccessibilitySettings()
+
+    @Published private(set) var reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+
+    private init() {
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                AccessibilitySettings.shared.refresh()
+            }
+        }
+    }
+
+    func refresh() {
+        reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+}
+
 // MARK: - 2. 程序入口
 @main
 struct ClickBoomApp: App {
@@ -350,13 +392,16 @@ final class PanelPresenter {
     }
 }
 
-/// 菜单栏图标：只负责外观，并在出现时把 openWindow 交给 PanelPresenter。
+/// 菜单栏图标：反映开关状态，并在出现时把 openWindow 交给 PanelPresenter。
 struct MenuBarLabel: View {
     @Environment(\.openWindow) private var openWindow
+    @ObservedObject private var appState = AppState.shared
 
     var body: some View {
         Image(systemName: "sparkles")
-            .accessibilityLabel(Text("ClickBoom"))
+            // 关闭时把图标调暗，一眼能看出当前没生效
+            .opacity(appState.isEnabled ? 1 : 0.35)
+            .accessibilityLabel(Text(appState.isEnabled ? "ClickBoom，已开启" : "ClickBoom，已关闭"))
             .onAppear {
                 PanelPresenter.shared.bind { id in
                     openWindow(id: id)
@@ -603,6 +648,13 @@ struct ControlPanelView: View {
     @StateObject private var loginItem = LaunchAtLogin.shared
     @StateObject private var permission = InputPermission.shared
     @StateObject private var update = UpdateChecker.shared
+    @State private var showResetConfirm = false
+
+    /// 在鼠标当前位置放一次效果，方便调参时立即看到结果
+    private func previewEffect() {
+        guard let point = OverlayGeometry.mousePoint() else { return }
+        EffectEngine.shared.trigger(at: point, force: true)
+    }
     
     @ViewBuilder
     private var updateStatusRow: some View {
@@ -659,7 +711,18 @@ struct ControlPanelView: View {
                             .foregroundColor(.white.opacity(0.5))
                     }
                     Spacer()
-                    
+
+                    Button {
+                        previewEffect()
+                    } label: {
+                        Label("预览", systemImage: "play.circle.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(.white)
+                    .help("在当前鼠标位置试一下当前效果")
+
                     // 顶部开关
                     Toggle("", isOn: $appState.isEnabled)
                         .toggleStyle(SwitchToggleStyle(tint: .green))
@@ -761,6 +824,26 @@ struct ControlPanelView: View {
                                     .font(.system(size: 12, weight: .semibold))
                                     .foregroundColor(.orange)
                             }
+
+                            Divider().background(Color.white.opacity(0.1))
+
+                            Toggle("右键 / 中键也触发", isOn: $appState.rightClickEnabled)
+                                .toggleStyle(.switch)
+                                .tint(.purple)
+                            Text("右键菜单、中键点击同样弹出效果")
+                                .font(.system(size: 11))
+                                .foregroundColor(.white.opacity(0.45))
+
+                            Divider().background(Color.white.opacity(0.1))
+
+                            Button(role: .destructive) {
+                                showResetConfirm = true
+                            } label: {
+                                Label("恢复默认设置", systemImage: "arrow.counterclockwise")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
                         }
 
                         SectionCard(icon: "gearshape.2", title: "系统") {
@@ -901,6 +984,12 @@ struct ControlPanelView: View {
         }
         .colorScheme(.dark)
         .environment(\.locale, Locale(identifier: "zh-Hans"))
+        .confirmationDialog("恢复默认设置？", isPresented: $showResetConfirm, titleVisibility: .visible) {
+            Button("恢复默认", role: .destructive) { appState.resetToDefaults() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("颜色、粒子、动画参数和选项都会回到初始值。")
+        }
     }
 }
 
@@ -1038,6 +1127,17 @@ extension Color {
 }
 
 // MARK: - 6. 核心逻辑 (保持不变)
+/// 全局坐标 → 覆盖层坐标的换算，面板预览和全局监听共用。
+enum OverlayGeometry {
+    /// 全局坐标（左下原点）→ 覆盖层视图坐标（左上原点，覆盖全部屏幕）
+    static func mousePoint() -> CGPoint? {
+        let union = ScreenUnion.frame
+        guard union.height > 0 else { return nil }
+        let location = NSEvent.mouseLocation
+        return CGPoint(x: location.x - union.minX, y: union.maxY - location.y)
+    }
+}
+
 /// 所有屏幕的并集（全局坐标，原点在主屏左下角）。
 /// 单块透明覆盖层铺满全部屏幕，副屏和竖屏都能落点。
 enum ScreenUnion {
@@ -1139,6 +1239,9 @@ struct Particle: Identifiable {
 }
 
 class EffectEngine: ObservableObject {
+    /// 面板里的「预览」和覆盖层共用同一个引擎
+    static let shared = EffectEngine()
+
     /// 全屏连点时的粒子总量上限，超过就丢掉最旧的一批，避免绘制开销拖垮帧率。
     private static let maxParticles = 600
 
@@ -1146,9 +1249,9 @@ class EffectEngine: ObservableObject {
     private var lastClickTime = Date.distantPast
     private var comboLevel = 0
 
-    func trigger(at point: CGPoint) {
+    func trigger(at point: CGPoint, force: Bool = false) {
         let state = AppState.shared
-        guard state.isEnabled else { return }
+        guard force || state.isEnabled else { return }
 
         let now = Date()
         if state.comboBoostEnabled {
@@ -1210,10 +1313,11 @@ class EffectEngine: ObservableObject {
 }
 
 struct EffectOverlayView: View {
-    @StateObject var engine = EffectEngine()
+    @ObservedObject var engine = EffectEngine.shared
     @StateObject private var mouseMonitor = GlobalMouseMonitor()
     @ObservedObject var appState = AppState.shared
     @ObservedObject private var permission = InputPermission.shared
+    @ObservedObject private var accessibility = AccessibilitySettings.shared
 
     var body: some View {
         // 没有粒子时暂停时间线，避免空闲状态一直 60fps 重绘（省电）
@@ -1300,6 +1404,8 @@ struct EffectOverlayView: View {
         let boostedSize = size * particle.intensity
         let distance = eased * radius * scale * particle.intensity
         let fade = max(0, 1 - progress)
+        // 开启「减弱动态效果」时，旋转与摇摆的幅度收到 1/5，尽量只保留位移和淡出
+        let motion = accessibility.reduceMotion ? 0.2 : 1.0
 
         switch effect {
         case .spark:
@@ -1349,7 +1455,7 @@ struct EffectOverlayView: View {
                 y: particle.y + drift * sinA + fall
             )
             let pieceSize = max(3, boostedSize * (0.55 + particle.variation * 0.55) * (1 - eased * 0.25))
-            let rotation = particle.angle + progress * (.pi * 1.5) + particle.variation
+            let rotation = particle.angle + progress * (.pi * 1.5) * motion + particle.variation
             let halfWidth = pieceSize * 0.55
             let halfHeight = pieceSize * 0.3
             let cosR = cos(rotation)
@@ -1441,7 +1547,7 @@ struct EffectOverlayView: View {
                 x: particle.x + travel * cosA,
                 y: particle.y + travel * sinA
             )
-            pixelContext.rotate(by: .radians(progress * 3.2 + particle.variation * 6.3))
+            pixelContext.rotate(by: .radians((progress * 3.2 + particle.variation * 6.3) * motion))
             let square = Path(CGRect(x: -side / 2, y: -side / 2, width: side, height: side))
             pixelContext.fill(square, with: .color(color.opacity(fade)))
 
@@ -1451,7 +1557,7 @@ struct EffectOverlayView: View {
             let easedHeart = localP * (2 - localP)
             let spread = radius * scale * particle.intensity
             let lift = easedHeart * spread * 1.8
-            let sway = sin(localP * .pi * 2.4 + particle.variation * 4) * spread * 0.22
+            let sway = sin(localP * .pi * 2.4 + particle.variation * 4) * spread * 0.22 * motion
             let heartX = particle.x + cosA * spread * 1.05 * easedHeart + sway
             let heartY = particle.y + sinA * spread * 0.28 * easedHeart - lift
                 - particle.variation * boostedSize * 0.9
@@ -1459,16 +1565,16 @@ struct EffectOverlayView: View {
             var heartContext = context
             heartContext.opacity = fade * 0.95
             heartContext.translateBy(x: heartX, y: heartY)
-            heartContext.rotate(by: .radians(sin(localP * .pi * 1.6 + particle.variation * 3) * 0.32))
+            heartContext.rotate(by: .radians(sin(localP * .pi * 1.6 + particle.variation * 3) * 0.32 * motion))
             heartContext.fill(heartPath(size: heartSize), with: .color(color))
 
         case .emoji:
             let popProgress = min(1, progress / 0.2)
             let popEase = 1 - pow(1 - popProgress, 3)
             let lift = eased * radius * scale * 0.65
-            let sway = sin(progress * .pi * 2.2 + particle.variation * 5) * size * 0.35 * fade
+            let sway = sin(progress * .pi * 2.2 + particle.variation * 5) * size * 0.35 * fade * motion
             let emojiScale = max(0.01, (0.45 + popEase * 0.55) * particle.intensity)
-            let rotation = sin(progress * .pi * 1.4 + particle.variation * 3) * 0.16
+            let rotation = sin(progress * .pi * 1.4 + particle.variation * 3) * 0.16 * motion
             var emojiContext = context
             emojiContext.opacity = fade
             emojiContext.translateBy(
@@ -1492,29 +1598,34 @@ final class GlobalMouseMonitor: ObservableObject {
     private var globalMonitor: Any?
     private var localMonitor: Any?
 
-    /// 全局坐标（左下原点）→ 覆盖层视图坐标（左上原点，覆盖全部屏幕）
-    private static func overlayPoint() -> CGPoint? {
-        let union = ScreenUnion.frame
-        guard union.height > 0 else { return nil }
-        let location = NSEvent.mouseLocation
-        return CGPoint(x: location.x - union.minX, y: union.maxY - location.y)
-    }
-
     func start(engine: EffectEngine) {
         guard globalMonitor == nil, localMonitor == nil else { return }
 
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak engine] _ in
+        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak engine] event in
+            guard Self.supports(event) else { return }
             DispatchQueue.main.async {
-                guard let point = Self.overlayPoint() else { return }
+                guard let point = OverlayGeometry.mousePoint() else { return }
                 engine?.trigger(at: point)
             }
         }
 
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak engine] event in
-            if let point = Self.overlayPoint() {
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak engine] event in
+            if Self.supports(event), let point = OverlayGeometry.mousePoint() {
                 engine?.trigger(at: point)
             }
             return event
+        }
+    }
+
+    /// 右键 / 中键是否也出效果，交给设置决定
+    private static func supports(_ event: NSEvent) -> Bool {
+        switch event.type {
+        case .rightMouseDown, .otherMouseDown:
+            return AppState.shared.rightClickEnabled
+        default:
+            return true
         }
     }
 
