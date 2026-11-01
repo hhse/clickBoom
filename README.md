@@ -26,8 +26,9 @@
 - 随机样式：每次点击自动抽取一种样式
 - 连续点击放大：短时间连续点击会逐步增加粒子数量和范围
 - 支持开机自启（基于系统登录项，可随时在控制面板或菜单栏开关）
-- 自动检测「输入监控」权限，未授权时直接在面板里提示并一键跳转设置
+- 自动检测「输入监控」权限，未授权时直接在面板里提示并一键跳转设置，授权后立即生效、无需重启
 - 支持多显示器：覆盖层铺满所有屏幕，副屏/竖屏点击同样有效，插拔显示器自动适配
+- 启动时只留在菜单栏，不弹面板（开机自启也不会打断登录），点 Dock 图标可随时叫回
 - 空闲时暂停动画渲染，不点击就不占绘图资源
 - 控制面板可拖拽调整窗口大小
 - 内置「检查更新」，直接对比 GitHub 上最新 Release
@@ -38,9 +39,24 @@
 ## 🖥️ 系统要求
 
 - macOS 26.0 或更高版本
-- Xcode 26.0 或更高版本（用于编译）
+- Xcode 26.0 或更高版本（仅编译时需要）
 
-首次运行时，如果系统提示权限请求，请前往“系统设置 → 隐私与安全性”，为应用开启所需的辅助功能或输入监控权限。该权限用于接收其他应用中的全局鼠标点击事件。
+首次运行时，系统会请求「输入监控」权限，用于接收其他应用中的全局鼠标点击事件。路径：系统设置 → 隐私与安全性 → 输入监控 → 勾选 ClickBoom。授权后无需重启 App，点击效果会立即生效。
+
+## 📦 安装
+
+1. 到 [Releases](https://github.com/hhse/clickBoom/releases) 下载最新的 `ClickBoom-x.y.z.dmg`。
+2. 打开 DMG，把 ClickBoom 拖进「应用程序」。
+3. 首次打开时，如果看到「无法验证开发者」的提示，说明安装包还没有经过 Apple 公证。任选一种方式放行：
+   - 在「应用程序」里 **右键点击 ClickBoom → 打开 → 再点「打开」**；
+   - 打开 系统设置 → 隐私与安全性，在底部点「仍要打开」；
+   - 或者用命令行去掉隔离标记：
+     ```bash
+     xattr -dr com.apple.quarantine /Applications/ClickBoom.app
+     ```
+4. 按提示授予「输入监控」权限，然后随便点几下鼠标即可看到效果。
+
+> 面板默认不再随启动弹出（开机自启时也不会打断登录），从菜单栏图标或 Dock 图标进入即可。
 
 ## 🚀 快速开始
 
@@ -76,6 +92,36 @@ xcodebuild \
   build
 ```
 
+如果 `xcode-select -p` 指向 CommandLineTools，需要先 `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`，或者临时指定：
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild ...
+```
+
+另外，仓库如果放在 iCloud Drive、网盘同步目录等 File Provider 路径下，产物会被写入 FinderInfo 等扩展属性，签名时会报
+`resource fork, Finder information, or similar detritus not allowed`。把构建目录指到系统临时目录即可：
+
+```bash
+xcodebuild ... -derivedDataPath "${TMPDIR}/clickboom-build"
+```
+
+### 打安装包
+
+```bash
+./scripts/release.sh          # 输出 dist/ClickBoom-<版本>.dmg（arm64 + x86_64 通用二进制）
+```
+
+需要正式分发（不再被 Gatekeeper 拦截）时，用 Developer ID 证书签名并公证：
+
+```bash
+xcrun notarytool store-credentials clickboom \
+  --apple-id <你的 Apple ID> --team-id <TEAMID> --password <App 专用密码>
+
+SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+NOTARY_PROFILE=clickboom \
+./scripts/release.sh
+```
+
 ## 🎛️ 参数说明
 
 | 参数 | 说明 |
@@ -97,6 +143,7 @@ clickBoom/
 ├── ContentView.swift       # SwiftUI 控制面板、全局监听和特效渲染
 └── Assets.xcassets/        # 应用图标和颜色资源
 clickBoom.xcodeproj/        # Xcode 工程文件
+scripts/release.sh          # 打包 DMG（通用二进制，可选签名/公证）
 ```
 
 核心实现集中在 `ContentView.swift`：
@@ -105,6 +152,21 @@ clickBoom.xcodeproj/        # Xcode 工程文件
 - `EffectStyle`：管理可用的效果样式
 - `EffectEngine`：创建和清理点击粒子
 - `EffectOverlayView`：通过 `Canvas` 和 `TimelineView` 绘制动画
+
+## 🗒️ 更新日志
+
+### 1.1.4
+
+- 修复取色偶发失效：目录色、灰度色、广色域色不再被静默重置成白色
+- 修复授权「输入监控」后仍需重启 App 才生效的问题
+- 启动时不再自动弹出控制面板（开机自启不打断登录），首次安装仍会亮一次，之后点 Dock 图标即可叫回
+- 连续点击时的粒子总量加上限，并减少空闲帧里的无效刷新
+- 应用名统一为 `ClickBoom`（此前 Dock 与菜单里显示为 `clickBoom`）
+- 新增 `scripts/release.sh`：一键打出 arm64 + x86_64 通用 DMG，支持可选签名与公证
+
+### 1.1.3
+
+- 新增水波、星芒、像素、爱心四种效果，支持多显示器与检查更新
 
 ## 🔗 开源地址
 

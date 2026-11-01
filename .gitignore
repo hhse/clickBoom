@@ -7,3 +7,7 @@ xcuserdata/
 
 # Local build products
 clickBoom.app/
+
+# Packaging output
+*.dmg
+dist/

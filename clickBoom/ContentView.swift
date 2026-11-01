@@ -152,11 +152,11 @@ class AppState: ObservableObject {
 // MARK: - 应用信息
 enum AppInfo {
     static var shortVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.3"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.4"
     }
 
     static var buildNumber: String {
-        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "5"
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "6"
     }
 
     static var version: String {
@@ -308,11 +308,60 @@ struct ClickBoomApp: App {
         }
         .windowStyle(.hiddenTitleBar) // 隐藏原生丑陋的标题栏
         .windowResizability(.contentMinSize) // 允许自由拖拽改变大小
+        .defaultSize(width: 440, height: 820)
+        // 常驻菜单栏的工具不该在每次启动（尤其是开机自启）时弹一个面板出来。
+        // 首次启动仍会由 AppDelegate 主动打开一次，之后从菜单栏或 Dock 图标进入。
+        .defaultLaunchBehavior(.suppressed)
+        // 同时关掉窗口状态恢复：否则「退出时面板还开着」会让下次启动（含登录启动）又被系统带出来。
+        .restorationBehavior(.disabled)
 
-        MenuBarExtra("ClickBoom", systemImage: "sparkles") {
+        MenuBarExtra {
             MenuBarQuickPanel()
+        } label: {
+            MenuBarLabel()
         }
         .menuBarExtraStyle(.window)
+    }
+}
+
+// MARK: - 从 AppDelegate 打开控制面板
+/// SwiftUI 的 openWindow 只能在视图里取到，这里借菜单栏图标把它捕获下来，
+/// 好让「点 Dock 图标」「首次启动」这类 AppDelegate 场景也能打开面板。
+@MainActor
+final class PanelPresenter {
+    static let shared = PanelPresenter()
+
+    private var openAction: ((String) -> Void)?
+
+    func bind(_ action: @escaping (String) -> Void) {
+        openAction = action
+    }
+
+    /// 面板动作还没绑定时（启动瞬间）自动重试几次。
+    func show(retries: Int = 8) {
+        if let openAction {
+            openAction("control-panel")
+            return
+        }
+        guard retries > 0 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.show(retries: retries - 1)
+        }
+    }
+}
+
+/// 菜单栏图标：只负责外观，并在出现时把 openWindow 交给 PanelPresenter。
+struct MenuBarLabel: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Image(systemName: "sparkles")
+            .accessibilityLabel(Text("ClickBoom"))
+            .onAppear {
+                PanelPresenter.shared.bind { id in
+                    openWindow(id: id)
+                }
+            }
     }
 }
 
@@ -548,7 +597,6 @@ struct QuickSlider: View {
     }
 }
 
-// MARK: - 3. 控制面板视图 (Modern UI)
 // MARK: - 3. 控制面板视图 (Modern UI)
 struct ControlPanelView: View {
     @StateObject var appState = AppState.shared
@@ -973,8 +1021,19 @@ extension Color {
         self.init(red: Double((rgb & 0xFF0000) >> 16) / 255.0, green: Double((rgb & 0x00FF00) >> 8) / 255.0, blue: Double(rgb & 0x0000FF) / 255.0)
     }
     func toHex() -> String? {
-        guard let components = self.cgColor?.components, components.count >= 3 else { return nil }
-        return String(format: "#%02lX%02lX%02lX", lroundf(Float(components[0]) * 255), lroundf(Float(components[1]) * 255), lroundf(Float(components[2]) * 255))
+        // 直接读 cgColor.components 有坑：目录色（如 .red）、灰度色只有 2 个分量，
+        // 广色域色还会超出 0...1，取不到就会让颜色被静默重置成白色。
+        // 统一转换到 sRGB 再钳制到合法区间。
+        guard let srgb = NSColor(self).usingColorSpace(.sRGB) else { return nil }
+        func channel(_ value: CGFloat) -> Int {
+            Int((min(max(value, 0), 1) * 255).rounded())
+        }
+        return String(
+            format: "#%02X%02X%02X",
+            channel(srgb.redComponent),
+            channel(srgb.greenComponent),
+            channel(srgb.blueComponent)
+        )
     }
 }
 
@@ -991,6 +1050,7 @@ enum ScreenUnion {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var overlayWindow: NSWindow?
+    private static let hasLaunchedOnceKey = "hasLaunchedOnce"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 显式设置 Dock 图标：老版本图标资源为空，系统会缓存成「白纸」，
@@ -1008,6 +1068,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             name: NSApplication.didChangeScreenParametersNotification,
             object: nil
         )
+        openPanelOnFirstLaunchIfNeeded()
+    }
+
+    /// 第一次安装后主动亮一次面板，免得用户以为没打开；之后启动只留在菜单栏。
+    private func openPanelOnFirstLaunchIfNeeded() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: Self.hasLaunchedOnceKey) else { return }
+        defaults.set(true, forKey: Self.hasLaunchedOnceKey)
+        PanelPresenter.shared.show(retries: 6)
+    }
+
+    /// 点 Dock 图标时，如果面板已经被关掉，就重新打开（SwiftUI 的 Window 场景不会自愈）。
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // 不能用 flag：特效覆盖层窗口一直「可见」，它会让这个值恒为 true。
+        let hasPanel = NSApp.windows.contains { $0.isVisible && $0.level == .normal && $0.canBecomeMain }
+        if !hasPanel {
+            PanelPresenter.shared.show()
+        }
+        return true
     }
 
     /// 插拔显示器、改分辨率、调整排列方式时重建覆盖层尺寸
@@ -1060,6 +1139,9 @@ struct Particle: Identifiable {
 }
 
 class EffectEngine: ObservableObject {
+    /// 全屏连点时的粒子总量上限，超过就丢掉最旧的一批，避免绘制开销拖垮帧率。
+    private static let maxParticles = 600
+
     @Published var particles: [Particle] = []
     private var lastClickTime = Date.distantPast
     private var comboLevel = 0
@@ -1110,11 +1192,20 @@ class EffectEngine: ObservableObject {
                 emoji: emoji
             ))
         }
+        let overflow = max(0, particles.count + newParticles.count - Self.maxParticles)
+        if overflow > 0 {
+            particles.removeFirst(min(overflow, particles.count))
+        }
         particles.append(contentsOf: newParticles)
     }
+
     func cleanUp(currentTime: Date) {
         let durationSec = AppState.shared.durationMs / 1000.0
-        particles = particles.filter { currentTime.timeIntervalSince($0.startTime) < durationSec }
+        let alive = particles.filter { currentTime.timeIntervalSince($0.startTime) < durationSec }
+        // 只有真的清理掉粒子时才重新赋值：否则每帧都会触发一次 @Published 更新。
+        if alive.count != particles.count {
+            particles = alive
+        }
     }
 }
 
@@ -1122,7 +1213,8 @@ struct EffectOverlayView: View {
     @StateObject var engine = EffectEngine()
     @StateObject private var mouseMonitor = GlobalMouseMonitor()
     @ObservedObject var appState = AppState.shared
-    
+    @ObservedObject private var permission = InputPermission.shared
+
     var body: some View {
         // 没有粒子时暂停时间线，避免空闲状态一直 60fps 重绘（省电）
         TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: engine.particles.isEmpty)) { context in
@@ -1154,6 +1246,11 @@ struct EffectOverlayView: View {
         }
         .onAppear { mouseMonitor.start(engine: engine) }
         .onDisappear { mouseMonitor.stop() }
+        .onChange(of: permission.isGranted) { _, granted in
+            // 用户在「系统设置」里刚勾上输入监控时，启动阶段注册的监听往往收不到事件，
+            // 重建一次监听即可让权限立刻生效，不必重启 App。
+            if granted { mouseMonitor.restart(engine: engine) }
+        }
     }
 
     /// 以 (0,0) 为中心、边长 size 的爱心路径
@@ -1432,4 +1529,9 @@ final class GlobalMouseMonitor: ObservableObject {
         }
     }
 
+    /// 输入监控权限变化后重建监听：早期注册的监听不会随权限自动开始投递事件。
+    func restart(engine: EffectEngine) {
+        stop()
+        start(engine: engine)
+    }
 }
