@@ -2,6 +2,7 @@ import SwiftUI
 import Combine
 import CoreGraphics
 import ServiceManagement
+import Carbon
 
 // MARK: - 点击效果样式
 enum EffectStyle: String, CaseIterable, Identifiable {
@@ -14,6 +15,8 @@ enum EffectStyle: String, CaseIterable, Identifiable {
     case starflare
     case pixel
     case hearts
+    case firework
+    case bolt
 
     var id: String { rawValue }
 
@@ -28,6 +31,8 @@ enum EffectStyle: String, CaseIterable, Identifiable {
         case .starflare: return "星芒"
         case .pixel: return "像素"
         case .hearts: return "爱心"
+        case .firework: return "烟花"
+        case .bolt: return "闪电"
         }
     }
 
@@ -42,6 +47,25 @@ enum EffectStyle: String, CaseIterable, Identifiable {
         case .starflare: return "sparkle"
         case .pixel: return "square.grid.3x3.fill"
         case .hearts: return "heart.fill"
+        case .firework: return "fireworks"
+        case .bolt: return "bolt.fill"
+        }
+    }
+
+    /// 一句话说明，帮助用户在视觉网格里快速挑选
+    var subtitle: String {
+        switch self {
+        case .spark: return "短线条四散"
+        case .ripple: return "圆弧向外展开"
+        case .burst: return "细光线快速划过"
+        case .confetti: return "彩纸轻轻飘落"
+        case .emoji: return "弹出随机表情"
+        case .wave: return "三圈涟漪扩散"
+        case .starflare: return "镜头星芒高光"
+        case .pixel: return "8-bit 方块飞散"
+        case .hearts: return "爱心错峰上浮"
+        case .firework: return "拖尾焰火炸开"
+        case .bolt: return "锯齿电弧闪现"
         }
     }
 }
@@ -51,6 +75,8 @@ enum EffectPreset: String, CaseIterable, Identifiable {
     case blue
     case ring
     case confetti
+    case cyber
+    case fireworks
 
     var id: String { rawValue }
 
@@ -60,6 +86,8 @@ enum EffectPreset: String, CaseIterable, Identifiable {
         case .blue: return "蓝光"
         case .ring: return "圆环"
         case .confetti: return "彩纸"
+        case .cyber: return "赛博"
+        case .fireworks: return "烟花"
         }
     }
 
@@ -69,6 +97,8 @@ enum EffectPreset: String, CaseIterable, Identifiable {
         case .blue: return "circle.fill"
         case .ring: return "circle.dotted"
         case .confetti: return "square.grid.2x2"
+        case .cyber: return "bolt.fill"
+        case .fireworks: return "fireworks"
         }
     }
 
@@ -82,6 +112,10 @@ enum EffectPreset: String, CaseIterable, Identifiable {
             return Settings(effect: .ripple, color: "#63F2CE", count: 6, size: 7, radius: 24, durationMs: 480, scale: 0.85)
         case .confetti:
             return Settings(effect: .confetti, color: "#FF77C8", count: 7, size: 6, radius: 20, durationMs: 520, scale: 0.9)
+        case .cyber:
+            return Settings(effect: .bolt, color: "#5BE7FF", count: 6, size: 6, radius: 34, durationMs: 420, scale: 1.0)
+        case .fireworks:
+            return Settings(effect: .firework, color: "#FFB45E", count: 11, size: 5, radius: 46, durationMs: 760, scale: 1.0)
         }
     }
 
@@ -96,23 +130,125 @@ enum EffectPreset: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - 自定义预设
+/// 用户保存的一整套外观参数，Codable 后直接存进 UserDefaults。
+struct PresetSnapshot: Codable, Identifiable, Equatable {
+    var id: UUID = UUID()
+    var name: String
+    var effect: String
+    var colorHex: String
+    var count: Int
+    var size: Double
+    var radius: Double
+    var durationMs: Double
+    var scale: Double
+    var emoji: String
+}
+
 // MARK: - 1. 全局状态管理 (AppState)
-class AppState: ObservableObject {
+/// 设置统一用 @Published 保存，再手动写回 UserDefaults。
+/// 这样面板、菜单栏和覆盖层读的是同一份状态，改完立刻同步，不会各显示各的。
+class AppState: NSObject, ObservableObject {
     static let shared = AppState()
-    
-    @AppStorage("isEnabled") var isEnabled: Bool = true
-    @AppStorage("sparkColorHex") var effectColorHex: String = "#FFFFFF"
-    @AppStorage("sparkSize") var particleSize: Double = 10.0
-    @AppStorage("sparkRadius") var particleRadius: Double = 15.0
-    @AppStorage("sparkCount") var particleCount: Int = 8
-    @AppStorage("duration") var durationMs: Double = 400.0
-    @AppStorage("extraScale") var scale: Double = 1.0
-    @AppStorage("effectStyle") var effectStyleRaw: String = EffectStyle.spark.rawValue
-    @AppStorage("randomEffectEnabled") var randomEffectEnabled: Bool = false
-    @AppStorage("comboBoostEnabled") var comboBoostEnabled: Bool = false
-    @AppStorage("customEmoji") var customEmoji: String = "✨"
-    @AppStorage("rightClickEnabled") var rightClickEnabled: Bool = true
+
+    private enum Key {
+        static let isEnabled = "isEnabled"
+        static let effectColorHex = "sparkColorHex"
+        static let particleSize = "sparkSize"
+        static let particleRadius = "sparkRadius"
+        static let particleCount = "sparkCount"
+        static let durationMs = "duration"
+        static let scale = "extraScale"
+        static let effectStyleRaw = "effectStyle"
+        static let randomEffectEnabled = "randomEffectEnabled"
+        static let comboBoostEnabled = "comboBoostEnabled"
+        static let customEmoji = "customEmoji"
+        static let rightClickEnabled = "rightClickEnabled"
+        static let hotkeyEnabled = "hotkeyEnabled"
+        static let savedPresets = "savedPresets"
+    }
+
+    private let defaults = UserDefaults.standard
+
+    @Published var isEnabled: Bool = true {
+        didSet { defaults.set(isEnabled, forKey: Key.isEnabled) }
+    }
+    @Published var effectColorHex: String = "#FFFFFF" {
+        didSet { defaults.set(effectColorHex, forKey: Key.effectColorHex) }
+    }
+    @Published var particleSize: Double = 10.0 {
+        didSet { defaults.set(particleSize, forKey: Key.particleSize) }
+    }
+    @Published var particleRadius: Double = 15.0 {
+        didSet { defaults.set(particleRadius, forKey: Key.particleRadius) }
+    }
+    @Published var particleCount: Int = 8 {
+        didSet { defaults.set(particleCount, forKey: Key.particleCount) }
+    }
+    @Published var durationMs: Double = 400.0 {
+        didSet { defaults.set(durationMs, forKey: Key.durationMs) }
+    }
+    @Published var scale: Double = 1.0 {
+        didSet { defaults.set(scale, forKey: Key.scale) }
+    }
+    @Published var effectStyleRaw: String = EffectStyle.spark.rawValue {
+        didSet { defaults.set(effectStyleRaw, forKey: Key.effectStyleRaw) }
+    }
+    @Published var randomEffectEnabled: Bool = false {
+        didSet { defaults.set(randomEffectEnabled, forKey: Key.randomEffectEnabled) }
+    }
+    @Published var comboBoostEnabled: Bool = false {
+        didSet { defaults.set(comboBoostEnabled, forKey: Key.comboBoostEnabled) }
+    }
+    @Published var customEmoji: String = "✨" {
+        didSet { defaults.set(customEmoji, forKey: Key.customEmoji) }
+    }
+    @Published var rightClickEnabled: Bool = true {
+        didSet { defaults.set(rightClickEnabled, forKey: Key.rightClickEnabled) }
+    }
+    @Published var hotkeyEnabled: Bool = true {
+        didSet { defaults.set(hotkeyEnabled, forKey: Key.hotkeyEnabled) }
+    }
+    @Published var savedPresets: [PresetSnapshot] = [] {
+        didSet {
+            guard let data = try? JSONEncoder().encode(savedPresets) else { return }
+            defaults.set(data, forKey: Key.savedPresets)
+        }
+    }
+
     @Published var comboCount: Int = 0
+
+    /// 暂停状态的剩余时间；由暂停计时器刷新，用来驱动菜单栏和面板上的倒计时
+    @Published private(set) var pauseUntil: Date?
+    @Published private(set) var pauseRemaining: TimeInterval = 0
+    private var pauseTimer: Timer?
+
+    override init() {
+        super.init()
+
+        let d = UserDefaults.standard
+
+        if let value = d.object(forKey: Key.isEnabled) as? Bool { isEnabled = value }
+        if let value = d.string(forKey: Key.effectColorHex) { effectColorHex = value }
+        if let value = d.object(forKey: Key.particleSize) as? NSNumber { particleSize = value.doubleValue }
+        if let value = d.object(forKey: Key.particleRadius) as? NSNumber { particleRadius = value.doubleValue }
+        if let value = d.object(forKey: Key.particleCount) as? NSNumber { particleCount = value.intValue }
+        if let value = d.object(forKey: Key.durationMs) as? NSNumber { durationMs = value.doubleValue }
+        if let value = d.object(forKey: Key.scale) as? NSNumber { scale = value.doubleValue }
+        if let value = d.string(forKey: Key.effectStyleRaw),
+           EffectStyle(rawValue: value) != nil {
+            effectStyleRaw = value
+        }
+        if let value = d.object(forKey: Key.randomEffectEnabled) as? Bool { randomEffectEnabled = value }
+        if let value = d.object(forKey: Key.comboBoostEnabled) as? Bool { comboBoostEnabled = value }
+        if let value = d.string(forKey: Key.customEmoji) { customEmoji = value }
+        if let value = d.object(forKey: Key.rightClickEnabled) as? Bool { rightClickEnabled = value }
+        if let value = d.object(forKey: Key.hotkeyEnabled) as? Bool { hotkeyEnabled = value }
+        if let data = d.data(forKey: Key.savedPresets),
+           let decoded = try? JSONDecoder().decode([PresetSnapshot].self, from: data) {
+            savedPresets = decoded
+        }
+    }
 
     var effectStyle: Binding<EffectStyle> {
         Binding(
@@ -135,6 +271,71 @@ class AppState: ObservableObject {
         return choices.isEmpty ? ["✨"] : choices
     }
 
+    var isPaused: Bool {
+        guard let pauseUntil else { return false }
+        return pauseUntil > Date()
+    }
+
+    /// 暂停剩余时间的人类可读描述，面板和菜单栏共用
+    var pauseRemainingText: String {
+        let seconds = Int(max(0, pauseRemaining).rounded(.up))
+        if seconds >= 60 {
+            let minutes = Int((Double(seconds) / 60.0).rounded(.up))
+            return "约 \(minutes) 分钟后恢复"
+        }
+        return "约 \(max(1, seconds)) 秒后恢复"
+    }
+
+    func toggleEnabled() {
+        // 暂停期间按快捷键视为「立刻恢复」，避免图标和实际状态互相打架
+        if isPaused {
+            resume()
+            isEnabled = true
+            return
+        }
+        isEnabled.toggle()
+    }
+
+    func pause(minutes: Int) {
+        let seconds = TimeInterval(max(1, minutes) * 60)
+        pauseUntil = Date().addingTimeInterval(seconds)
+        pauseRemaining = seconds
+        startPauseTimer()
+    }
+
+    func resume() {
+        pauseUntil = nil
+        pauseRemaining = 0
+        pauseTimer?.invalidate()
+        pauseTimer = nil
+    }
+
+    private func startPauseTimer() {
+        pauseTimer?.invalidate()
+        let timer = Timer(
+            timeInterval: 15,
+            target: self,
+            selector: #selector(pauseTick),
+            userInfo: nil,
+            repeats: true
+        )
+        RunLoop.main.add(timer, forMode: .common)
+        pauseTimer = timer
+    }
+
+    @objc private func pauseTick() {
+        guard let pauseUntil else {
+            resume()
+            return
+        }
+        let remaining = pauseUntil.timeIntervalSinceNow
+        if remaining <= 0 {
+            resume()
+        } else {
+            pauseRemaining = remaining
+        }
+    }
+
     func apply(_ preset: EffectPreset) {
         let settings = preset.settings
         effectStyleRaw = settings.effect.rawValue
@@ -149,7 +350,49 @@ class AppState: ObservableObject {
         comboCount = 0
     }
 
-    /// 恢复默认值：只重置效果参数和选项，不动「启用」开关。
+    func apply(_ preset: PresetSnapshot) {
+        if EffectStyle(rawValue: preset.effect) != nil {
+            effectStyleRaw = preset.effect
+        }
+        effectColorHex = preset.colorHex
+        particleCount = preset.count
+        particleSize = preset.size
+        particleRadius = preset.radius
+        durationMs = preset.durationMs
+        scale = preset.scale
+        customEmoji = preset.emoji
+        randomEffectEnabled = false
+        comboCount = 0
+    }
+
+    @discardableResult
+    func saveCurrentPreset(named rawName: String) -> String {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalName = name.isEmpty ? "我的预设 \(savedPresets.count + 1)" : name
+        let snapshot = PresetSnapshot(
+            name: finalName,
+            effect: effectStyleRaw,
+            colorHex: effectColorHex,
+            count: particleCount,
+            size: particleSize,
+            radius: particleRadius,
+            durationMs: durationMs,
+            scale: scale,
+            emoji: customEmoji
+        )
+        if let index = savedPresets.firstIndex(where: { $0.name == finalName }) {
+            savedPresets[index] = snapshot
+        } else {
+            savedPresets.append(snapshot)
+        }
+        return finalName
+    }
+
+    func deletePreset(_ preset: PresetSnapshot) {
+        savedPresets.removeAll { $0.id == preset.id }
+    }
+
+    /// 恢复默认值：只重置效果参数和选项，不动「启用」开关和已保存的预设。
     func resetToDefaults() {
         effectColorHex = "#FFFFFF"
         particleSize = 10
@@ -166,14 +409,85 @@ class AppState: ObservableObject {
     }
 }
 
+// MARK: - 全局快捷键
+/// Carbon 的 RegisterEventHotKey 不需要额外权限，用来给「开关特效」绑一个全局快捷键。
+@MainActor
+final class HotKeyManager: ObservableObject {
+    static let shared = HotKeyManager()
+    static let shortcutLabel = "⌃⌥B"
+
+    @Published private(set) var isRegistered = false
+
+    private var hotKeyRef: EventHotKeyRef?
+    private var handlerRef: EventHandlerRef?
+
+    func sync() {
+        unregister()
+        guard AppState.shared.hotkeyEnabled else { return }
+        installHandlerIfNeeded()
+
+        var ref: EventHotKeyRef?
+        let hotKeyID = EventHotKeyID(signature: OSType(0x434C_4B42), id: 1)
+        let status = RegisterEventHotKey(
+            UInt32(kVK_ANSI_B),
+            UInt32(controlKey | optionKey),
+            hotKeyID,
+            GetApplicationEventTarget(),
+            0,
+            &ref
+        )
+        if status == noErr {
+            hotKeyRef = ref
+            isRegistered = true
+        } else {
+            isRegistered = false
+        }
+    }
+
+    func unregister() {
+        if let hotKeyRef {
+            UnregisterEventHotKey(hotKeyRef)
+        }
+        hotKeyRef = nil
+        isRegistered = false
+    }
+
+    private func installHandlerIfNeeded() {
+        guard handlerRef == nil else { return }
+        var eventType = EventTypeSpec(
+            eventClass: OSType(kEventClassKeyboard),
+            eventKind: UInt32(kEventHotKeyPressed)
+        )
+        InstallEventHandler(
+            GetApplicationEventTarget(),
+            clickBoomHotKeyHandler,
+            1,
+            &eventType,
+            nil,
+            &handlerRef
+        )
+    }
+}
+
+nonisolated private func clickBoomHotKeyHandler(
+    _ callRef: EventHandlerCallRef?,
+    _ event: EventRef?,
+    _ userData: UnsafeMutableRawPointer?
+) -> OSStatus {
+    Task { @MainActor in
+        AppState.shared.toggleEnabled()
+    }
+    return noErr
+}
+
 // MARK: - 应用信息
 enum AppInfo {
     static var shortVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.5"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.6"
     }
 
     static var buildNumber: String {
-        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "7"
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "8"
     }
 
     static var version: String {
@@ -196,7 +510,23 @@ final class UpdateChecker: ObservableObject {
 
     @Published private(set) var status: Status = .idle
 
+    /// 菜单栏小红点用；随 status 的 @Published 一起刷新
+    var hasUpdate: Bool {
+        if case .available = status { return true }
+        return false
+    }
+
     private let latestURL = URL(string: "https://api.github.com/repos/hhse/clickBoom/releases/latest")!
+    private let lastCheckKey = "lastUpdateCheckAt"
+
+    /// 启动时调用：距上次检查超过 interval 才真正请求，避免每次打开都打 GitHub。
+    func checkIfDue(interval: TimeInterval = 24 * 60 * 60) {
+        let last = UserDefaults.standard.double(forKey: lastCheckKey)
+        let now = Date().timeIntervalSince1970
+        guard last <= 0 || now - last >= interval else { return }
+        UserDefaults.standard.set(now, forKey: lastCheckKey)
+        check()
+    }
 
     func check() {
         guard status != .checking else { return }
@@ -396,17 +726,27 @@ final class PanelPresenter {
 struct MenuBarLabel: View {
     @Environment(\.openWindow) private var openWindow
     @ObservedObject private var appState = AppState.shared
+    @ObservedObject private var update = UpdateChecker.shared
 
     var body: some View {
-        Image(systemName: "sparkles")
-            // 关闭时把图标调暗，一眼能看出当前没生效
-            .opacity(appState.isEnabled ? 1 : 0.35)
-            .accessibilityLabel(Text(appState.isEnabled ? "ClickBoom，已开启" : "ClickBoom，已关闭"))
-            .onAppear {
-                PanelPresenter.shared.bind { id in
-                    openWindow(id: id)
-                }
+        ZStack(alignment: .topTrailing) {
+            Image(systemName: appState.isPaused ? "pause.circle" : "sparkles")
+                // 关闭时把图标调暗，一眼能看出当前没生效
+                .opacity(appState.isEnabled ? 1 : 0.35)
+                .accessibilityLabel(Text(appState.isEnabled ? "ClickBoom，已开启" : "ClickBoom，已关闭"))
+
+            if update.hasUpdate {
+                Circle()
+                    .fill(Color.orange)
+                    .frame(width: 5, height: 5)
+                    .offset(x: 3, y: -2)
             }
+        }
+        .onAppear {
+            PanelPresenter.shared.bind { id in
+                openWindow(id: id)
+            }
+        }
     }
 }
 
@@ -417,6 +757,7 @@ struct MenuBarQuickPanel: View {
     @StateObject private var loginItem = LaunchAtLogin.shared
     @StateObject private var permission = InputPermission.shared
     @StateObject private var update = UpdateChecker.shared
+    @StateObject private var hotkey = HotKeyManager.shared
 
     private var particleCount: Binding<Double> {
         Binding(
@@ -428,9 +769,9 @@ struct MenuBarQuickPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
-                Image(systemName: "sparkles")
+                Image(systemName: appState.isPaused ? "pause.circle.fill" : "sparkles")
                     .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.tint)
+                    .foregroundStyle(appState.isPaused ? Color.orange : Color.accentColor)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("ClickBoom")
                         .font(.system(size: 14, weight: .semibold))
@@ -445,7 +786,51 @@ struct MenuBarQuickPanel: View {
                     .help("开启或关闭点击特效")
             }
 
+            if appState.isPaused {
+                HStack(spacing: 8) {
+                    Image(systemName: "pause.circle.fill")
+                        .foregroundStyle(.orange)
+                    Text("已暂停，\(appState.pauseRemainingText)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("恢复") { appState.resume() }
+                        .buttonStyle(.link)
+                        .font(.system(size: 11))
+                }
+            }
+
             Divider()
+
+            HStack(spacing: 8) {
+                Button {
+                    if let point = OverlayGeometry.mousePoint() {
+                        EffectEngine.shared.trigger(at: point, force: true)
+                    }
+                } label: {
+                    Label("预览", systemImage: "play.circle")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                Menu {
+                    Button("暂停 15 分钟") { appState.pause(minutes: 15) }
+                    Button("暂停 30 分钟") { appState.pause(minutes: 30) }
+                    Button("暂停 60 分钟") { appState.pause(minutes: 60) }
+                    if appState.isPaused {
+                        Divider()
+                        Button("立即恢复") { appState.resume() }
+                    }
+                } label: {
+                    Label("暂停", systemImage: "pause.circle")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+
+                Spacer()
+            }
 
             if !permission.isGranted {
                 Button {
@@ -475,6 +860,20 @@ struct MenuBarQuickPanel: View {
                 }
             } label: {
                 Label("预设", systemImage: "slider.horizontal.3")
+            }
+
+            if !appState.savedPresets.isEmpty {
+                Menu {
+                    ForEach(appState.savedPresets) { preset in
+                        Button {
+                            appState.apply(preset)
+                        } label: {
+                            Text(preset.name)
+                        }
+                    }
+                } label: {
+                    Label("我的预设", systemImage: "bookmark.fill")
+                }
             }
 
             Picker("效果", selection: appState.effectStyle) {
@@ -531,6 +930,18 @@ struct MenuBarQuickPanel: View {
             if appState.comboBoostEnabled, appState.comboCount > 1 {
                 Label("连击 ×\(appState.comboCount)", systemImage: "flame.fill")
                     .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.orange)
+            }
+            Toggle("全局快捷键 \(HotKeyManager.shortcutLabel)", isOn: Binding(
+                get: { appState.hotkeyEnabled },
+                set: { newValue in
+                    appState.hotkeyEnabled = newValue
+                    HotKeyManager.shared.sync()
+                }
+            ))
+            if appState.hotkeyEnabled, !hotkey.isRegistered {
+                Text("快捷键没注册上，可能被其他 App 占用了。")
+                    .font(.system(size: 10))
                     .foregroundStyle(.orange)
             }
 
@@ -648,7 +1059,25 @@ struct ControlPanelView: View {
     @StateObject private var loginItem = LaunchAtLogin.shared
     @StateObject private var permission = InputPermission.shared
     @StateObject private var update = UpdateChecker.shared
+    @StateObject private var hotkey = HotKeyManager.shared
     @State private var showResetConfirm = false
+    @State private var showSavePreset = false
+    @State private var presetName = ""
+
+    private let quickColors = ["#FFFFFF", "#66E8FF", "#63F2CE", "#FF77C8", "#FFB45E", "#B48CFF"]
+    private let quickEmojis = ["✨", "🔥", "💖", "🎉", "⚡", "💫", "🌸", "🫧"]
+
+    /// Emoji 快选：点一下加入，再点一下移除
+    private func toggleEmoji(_ emoji: String) {
+        if appState.customEmoji.contains(emoji) {
+            appState.customEmoji = appState.customEmoji.replacingOccurrences(of: emoji, with: "")
+        } else {
+            appState.customEmoji += emoji
+        }
+        if appState.customEmoji.isEmpty {
+            appState.customEmoji = "✨"
+        }
+    }
 
     /// 在鼠标当前位置放一次效果，方便调参时立即看到结果
     private func previewEffect() {
@@ -723,6 +1152,24 @@ struct ControlPanelView: View {
                     .tint(.white)
                     .help("在当前鼠标位置试一下当前效果")
 
+                    Menu {
+                        Button("暂停 15 分钟") { appState.pause(minutes: 15) }
+                        Button("暂停 30 分钟") { appState.pause(minutes: 30) }
+                        Button("暂停 60 分钟") { appState.pause(minutes: 60) }
+                        if appState.isPaused {
+                            Divider()
+                            Button("立即恢复") { appState.resume() }
+                        }
+                    } label: {
+                        Image(systemName: "pause.circle")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .tint(.white)
+                    .help("定时暂停特效")
+
                     // 顶部开关
                     Toggle("", isOn: $appState.isEnabled)
                         .toggleStyle(SwitchToggleStyle(tint: .green))
@@ -731,6 +1178,22 @@ struct ControlPanelView: View {
                 .padding(.horizontal, 24)
                 .padding(.top, 24)
                 .padding(.bottom, 20)
+
+                if appState.isPaused {
+                    HStack(spacing: 8) {
+                        Image(systemName: "pause.circle.fill")
+                            .foregroundColor(.orange)
+                        Text("特效已暂停，\(appState.pauseRemainingText)")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.white.opacity(0.7))
+                        Spacer()
+                        Button("恢复") { appState.resume() }
+                            .buttonStyle(.link)
+                            .font(.system(size: 11))
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 12)
+                }
                 
                 // --- 中间滚动区域 ---
                 ScrollView(showsIndicators: false) {
@@ -747,25 +1210,44 @@ struct ControlPanelView: View {
                                     .labelsHidden()
                             }
 
+                            HStack(spacing: 8) {
+                                ForEach(quickColors, id: \.self) { hex in
+                                    Button {
+                                        appState.effectColorHex = hex
+                                    } label: {
+                                        Circle()
+                                            .fill(Color(hex: hex) ?? .white)
+                                            .frame(width: 20, height: 20)
+                                            .overlay(
+                                                Circle().stroke(
+                                                    Color.white.opacity(appState.effectColorHex.uppercased() == hex ? 0.95 : 0.15),
+                                                    lineWidth: appState.effectColorHex.uppercased() == hex ? 2 : 1
+                                                )
+                                            )
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help(hex)
+                                }
+                                Spacer(minLength: 0)
+                            }
+
                             Divider().background(Color.white.opacity(0.1))
 
-                            HStack {
-                                Label("效果", systemImage: appState.effectStyle.wrappedValue.icon)
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundColor(.white.opacity(0.8))
-                                Spacer()
-                                Picker("效果", selection: appState.effectStyle) {
-                                    ForEach(EffectStyle.allCases) { effect in
-                                        Text(effect.title).tag(effect)
+                            Text("效果样式")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.white.opacity(0.8))
+
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
+                                ForEach(EffectStyle.allCases) { effect in
+                                    EffectChip(effect: effect, isSelected: appState.effectStyle.wrappedValue == effect) {
+                                        appState.effectStyleRaw = effect.rawValue
                                     }
                                 }
-                                .labelsHidden()
-                                .pickerStyle(.menu)
-                                .tint(.white)
-                                .frame(width: 120, alignment: .trailing)
                             }
 
                             if appState.effectStyle.wrappedValue == .emoji {
+                                Divider().background(Color.white.opacity(0.1))
+
                                 HStack(spacing: 10) {
                                     Label("自定义 Emoji", systemImage: "face.smiling")
                                         .font(.system(size: 13, weight: .medium))
@@ -773,6 +1255,23 @@ struct ControlPanelView: View {
                                     TextField("例如：✨🔥💖", text: $appState.customEmoji)
                                         .textFieldStyle(.roundedBorder)
                                         .frame(width: 130)
+                                }
+
+                                HStack(spacing: 6) {
+                                    ForEach(quickEmojis, id: \.self) { emoji in
+                                        Button {
+                                            toggleEmoji(emoji)
+                                        } label: {
+                                            Text(emoji)
+                                                .font(.system(size: 14))
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 4)
+                                                .background(Color.white.opacity(appState.customEmoji.contains(emoji) ? 0.22 : 0.06))
+                                                .cornerRadius(6)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .help("点一下加入 / 移除")
+                                    }
                                 }
                             }
                         }
@@ -782,6 +1281,41 @@ struct ControlPanelView: View {
                                 ForEach(EffectPreset.allCases) { preset in
                                     PresetButton(preset: preset) {
                                         appState.apply(preset)
+                                    }
+                                }
+                            }
+
+                            Divider().background(Color.white.opacity(0.1))
+
+                            HStack {
+                                Text("我的预设")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(.white.opacity(0.45))
+                                Spacer()
+                                Button {
+                                    presetName = ""
+                                    showSavePreset = true
+                                } label: {
+                                    Label("保存当前", systemImage: "plus")
+                                        .font(.system(size: 11, weight: .semibold))
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+
+                            if appState.savedPresets.isEmpty {
+                                Text("调好参数后点「保存当前」，就能把自己的搭配固定下来。")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.white.opacity(0.4))
+                                    .fixedSize(horizontal: false, vertical: true)
+                            } else {
+                                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                                    ForEach(appState.savedPresets) { preset in
+                                        SavedPresetChip(preset: preset) {
+                                            appState.apply(preset)
+                                        } onDelete: {
+                                            appState.deletePreset(preset)
+                                        }
                                     }
                                 }
                             }
@@ -833,6 +1367,26 @@ struct ControlPanelView: View {
                             Text("右键菜单、中键点击同样弹出效果")
                                 .font(.system(size: 11))
                                 .foregroundColor(.white.opacity(0.45))
+
+                            Divider().background(Color.white.opacity(0.1))
+
+                            Toggle("全局快捷键 \(HotKeyManager.shortcutLabel)", isOn: Binding(
+                                get: { appState.hotkeyEnabled },
+                                set: { newValue in
+                                    appState.hotkeyEnabled = newValue
+                                    HotKeyManager.shared.sync()
+                                }
+                            ))
+                            .toggleStyle(.switch)
+                            .tint(.mint)
+                            Text("在任意 App 里按 \(HotKeyManager.shortcutLabel) 开关特效，不需要额外权限")
+                                .font(.system(size: 11))
+                                .foregroundColor(.white.opacity(0.45))
+                            if appState.hotkeyEnabled, !hotkey.isRegistered {
+                                Label("注册失败，可能被其他 App 占用了", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.orange)
+                            }
 
                             Divider().background(Color.white.opacity(0.1))
 
@@ -990,6 +1544,16 @@ struct ControlPanelView: View {
         } message: {
             Text("颜色、粒子、动画参数和选项都会回到初始值。")
         }
+        .alert("保存为预设", isPresented: $showSavePreset) {
+            TextField("预设名称", text: $presetName)
+            Button("保存") {
+                appState.saveCurrentPreset(named: presetName)
+                presetName = ""
+            }
+            Button("取消", role: .cancel) { presetName = "" }
+        } message: {
+            Text("会保存当前效果、颜色、粒子、动画和 Emoji；同名预设直接覆盖。")
+        }
     }
 }
 
@@ -1045,6 +1609,72 @@ struct PresetButton: View {
             .cornerRadius(8)
         }
         .buttonStyle(.plain)
+    }
+}
+
+struct EffectChip: View {
+    let effect: EffectStyle
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: effect.icon)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(effect.title)
+                    .font(.system(size: 10, weight: .medium))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 7)
+            .foregroundColor(isSelected ? .black : .white.opacity(0.8))
+            .background(isSelected ? Color.white : Color.white.opacity(0.07))
+            .cornerRadius(8)
+        }
+        .buttonStyle(.plain)
+        .help(effect.subtitle)
+    }
+}
+
+struct SavedPresetChip: View {
+    let preset: PresetSnapshot
+    let onApply: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Button(action: onApply) {
+                HStack(spacing: 6) {
+                    Image(systemName: "bookmark.fill")
+                        .font(.system(size: 10))
+                    Text(preset.name)
+                        .font(.system(size: 11, weight: .medium))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button(action: onDelete) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundColor(.white.opacity(0.4))
+                    .padding(4)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("删除预设")
+        }
+        .foregroundColor(.white.opacity(0.85))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 8)
+        .background(Color.white.opacity(0.07))
+        .cornerRadius(8)
+        .contextMenu {
+            Button("删除预设", role: .destructive, action: onDelete)
+        }
     }
 }
 
@@ -1169,6 +1799,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
         openPanelOnFirstLaunchIfNeeded()
+        HotKeyManager.shared.sync()
+        UpdateChecker.shared.checkIfDue()
     }
 
     /// 第一次安装后主动亮一次面板，免得用户以为没打开；之后启动只留在菜单栏。
@@ -1251,7 +1883,7 @@ class EffectEngine: ObservableObject {
 
     func trigger(at point: CGPoint, force: Bool = false) {
         let state = AppState.shared
-        guard force || state.isEnabled else { return }
+        guard force || (state.isEnabled && !state.isPaused) else { return }
 
         let now = Date()
         if state.comboBoostEnabled {
@@ -1589,6 +2221,104 @@ struct EffectOverlayView: View {
                 at: .zero,
                 anchor: .center
             )
+
+        case .firework:
+            // 焰火：向外炸开后受重力下坠，每颗粒子拖一条渐隐尾迹
+            let spread = radius * scale * particle.intensity
+            let gravity = eased * eased * spread * 0.85
+            let headX = particle.x + distance * cosA
+            let headY = particle.y + distance * sinA + gravity
+            let trailLength = max(3, boostedSize * (1.6 - progress))
+            let tailX = headX - trailLength * cosA
+            let tailY = headY - trailLength * sinA
+
+            var trail = Path()
+            trail.move(to: CGPoint(x: tailX, y: tailY))
+            trail.addLine(to: CGPoint(x: headX, y: headY))
+            context.stroke(
+                trail,
+                with: .linearGradient(
+                    Gradient(colors: [color.opacity(0), color.opacity(fade * 0.7)]),
+                    startPoint: CGPoint(x: tailX, y: tailY),
+                    endPoint: CGPoint(x: headX, y: headY)
+                ),
+                style: StrokeStyle(lineWidth: max(1.2, boostedSize * 0.15), lineCap: .round)
+            )
+
+            let headRadius = max(1, boostedSize * 0.17 * (0.6 + 0.4 * fade))
+            var head = Path()
+            head.addEllipse(in: CGRect(
+                x: headX - headRadius,
+                y: headY - headRadius,
+                width: headRadius * 2,
+                height: headRadius * 2
+            ))
+            context.fill(head, with: .color(color.opacity(fade * 0.95)))
+
+            if particle.variation < 0.001 {
+                let flashRadius = max(2, spread * 0.24 * (0.35 + eased * 0.65))
+                var flash = Path()
+                flash.addEllipse(in: CGRect(
+                    x: particle.x - flashRadius,
+                    y: particle.y - flashRadius,
+                    width: flashRadius * 2,
+                    height: flashRadius * 2
+                ))
+                context.fill(
+                    flash,
+                    with: .radialGradient(
+                        Gradient(colors: [color.opacity(fade * 0.5), color.opacity(0)]),
+                        center: CGPoint(x: particle.x, y: particle.y),
+                        startRadius: 0,
+                        endRadius: flashRadius
+                    )
+                )
+            }
+
+        case .bolt:
+            // 闪电：沿角度折出 5 段锯齿，宽发光 + 细亮芯
+            let span = radius * scale * particle.intensity
+                * (0.45 + particle.variation * 0.55)
+            let normalX = -sinA
+            let normalY = cosA
+            var points: [CGPoint] = [CGPoint(x: particle.x, y: particle.y)]
+            for segment in 1...5 {
+                let t = Double(segment) / 5.0
+                let jitter = sin(t * 11 + particle.variation * 97 + Double(segment) * 13.7)
+                    * boostedSize * 0.9 * (1 - t * 0.35) * motion
+                points.append(CGPoint(
+                    x: particle.x + span * t * cosA + normalX * jitter,
+                    y: particle.y + span * t * sinA + normalY * jitter
+                ))
+            }
+
+            var bolt = Path()
+            bolt.move(to: points[0])
+            for point in points.dropFirst() {
+                bolt.addLine(to: point)
+            }
+            context.stroke(
+                bolt,
+                with: .color(color.opacity(fade * 0.22)),
+                style: StrokeStyle(lineWidth: max(4, boostedSize * 0.7), lineCap: .round, lineJoin: .round)
+            )
+            context.stroke(
+                bolt,
+                with: .color(color.opacity(fade)),
+                style: StrokeStyle(lineWidth: max(1.4, boostedSize * 0.16), lineCap: .round, lineJoin: .round)
+            )
+
+            if particle.variation < 0.08 {
+                let coreRadius = max(2, boostedSize * 0.55 * (1 - eased * 0.5))
+                var core = Path()
+                core.addEllipse(in: CGRect(
+                    x: particle.x - coreRadius,
+                    y: particle.y - coreRadius,
+                    width: coreRadius * 2,
+                    height: coreRadius * 2
+                ))
+                context.fill(core, with: .color(color.opacity(fade * 0.9)))
+            }
         }
     }
 }
