@@ -70,6 +70,50 @@ enum EffectStyle: String, CaseIterable, Identifiable {
     }
 }
 
+enum TrailStyle: String, CaseIterable, Identifiable {
+    case classic
+    case brush
+    case neon
+    case comet
+    case ribbon
+    case stardust
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .classic: return "光带"
+        case .brush: return "毛笔"
+        case .neon: return "霓虹"
+        case .comet: return "彗星"
+        case .ribbon: return "丝带"
+        case .stardust: return "星尘"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .classic: return "scribble.variable"
+        case .brush: return "paintbrush.pointed"
+        case .neon: return "lightbulb.led"
+        case .comet: return "sparkle"
+        case .ribbon: return "wind"
+        case .stardust: return "sparkles"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .classic: return "柔和渐隐的光带"
+        case .brush: return "随快慢变粗细的笔锋"
+        case .neon: return "高亮的霓虹灯管"
+        case .comet: return "拖着星火的彗星"
+        case .ribbon: return "半透明的宽丝带"
+        case .stardust: return "散落的星尘光点"
+        }
+    }
+}
+
 enum EffectPreset: String, CaseIterable, Identifiable {
     case standard
     case blue
@@ -161,6 +205,8 @@ class AppState: NSObject, ObservableObject {
         static let scale = "extraScale"
         static let effectStyleRaw = "effectStyle"
         static let randomEffectEnabled = "randomEffectEnabled"
+        static let trailEnabled = "trailEnabled"
+        static let trailStyleRaw = "trailStyle"
         static let comboBoostEnabled = "comboBoostEnabled"
         static let customEmoji = "customEmoji"
         static let rightClickEnabled = "rightClickEnabled"
@@ -196,6 +242,14 @@ class AppState: NSObject, ObservableObject {
     }
     @Published var randomEffectEnabled: Bool = false {
         didSet { defaults.set(randomEffectEnabled, forKey: Key.randomEffectEnabled) }
+    }
+    /// 拖尾是独立开关：打开后无论选哪种点击效果，移动鼠标都会留下光带
+    @Published var trailEnabled: Bool = false {
+        didSet { defaults.set(trailEnabled, forKey: Key.trailEnabled) }
+    }
+    /// 拖尾样式：光带 / 霓虹 / 彗星 / 丝带 / 星尘
+    @Published var trailStyleRaw: String = TrailStyle.classic.rawValue {
+        didSet { defaults.set(trailStyleRaw, forKey: Key.trailStyleRaw) }
     }
     @Published var comboBoostEnabled: Bool = false {
         didSet { defaults.set(comboBoostEnabled, forKey: Key.comboBoostEnabled) }
@@ -240,6 +294,11 @@ class AppState: NSObject, ObservableObject {
             effectStyleRaw = value
         }
         if let value = d.object(forKey: Key.randomEffectEnabled) as? Bool { randomEffectEnabled = value }
+        if let value = d.object(forKey: Key.trailEnabled) as? Bool { trailEnabled = value }
+        if let value = d.string(forKey: Key.trailStyleRaw),
+           TrailStyle(rawValue: value) != nil {
+            trailStyleRaw = value
+        }
         if let value = d.object(forKey: Key.comboBoostEnabled) as? Bool { comboBoostEnabled = value }
         if let value = d.string(forKey: Key.customEmoji) { customEmoji = value }
         if let value = d.object(forKey: Key.rightClickEnabled) as? Bool { rightClickEnabled = value }
@@ -254,6 +313,13 @@ class AppState: NSObject, ObservableObject {
         Binding(
             get: { EffectStyle(rawValue: self.effectStyleRaw) ?? .spark },
             set: { self.effectStyleRaw = $0.rawValue }
+        )
+    }
+
+    var trailStyle: Binding<TrailStyle> {
+        Binding(
+            get: { TrailStyle(rawValue: self.trailStyleRaw) ?? .classic },
+            set: { self.trailStyleRaw = $0.rawValue }
         )
     }
 
@@ -402,6 +468,8 @@ class AppState: NSObject, ObservableObject {
         scale = 1.0
         effectStyleRaw = EffectStyle.spark.rawValue
         randomEffectEnabled = false
+        trailEnabled = false
+        trailStyleRaw = TrailStyle.classic.rawValue
         comboBoostEnabled = false
         customEmoji = "✨"
         rightClickEnabled = true
@@ -483,11 +551,11 @@ nonisolated private func clickBoomHotKeyHandler(
 // MARK: - 应用信息
 enum AppInfo {
     static var shortVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.6"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.7"
     }
 
     static var buildNumber: String {
-        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "8"
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "9"
     }
 
     static var version: String {
@@ -805,7 +873,7 @@ struct MenuBarQuickPanel: View {
             HStack(spacing: 8) {
                 Button {
                     if let point = OverlayGeometry.mousePoint() {
-                        EffectEngine.shared.trigger(at: point, force: true)
+                        EffectEngine.shared.preview(at: point)
                     }
                 } label: {
                     Label("预览", systemImage: "play.circle")
@@ -926,6 +994,15 @@ struct MenuBarQuickPanel: View {
             )
 
             Toggle("随机样式", isOn: $appState.randomEffectEnabled)
+            Toggle("滑动拖尾", isOn: $appState.trailEnabled)
+            if appState.trailEnabled {
+                Picker("拖尾样式", selection: $appState.trailStyleRaw) {
+                    ForEach(TrailStyle.allCases) { style in
+                        Text(style.title).tag(style.rawValue)
+                    }
+                }
+                .pickerStyle(.menu)
+            }
             Toggle("连续点击放大", isOn: $appState.comboBoostEnabled)
             if appState.comboBoostEnabled, appState.comboCount > 1 {
                 Label("连击 ×\(appState.comboCount)", systemImage: "flame.fill")
@@ -1082,7 +1159,7 @@ struct ControlPanelView: View {
     /// 在鼠标当前位置放一次效果，方便调参时立即看到结果
     private func previewEffect() {
         guard let point = OverlayGeometry.mousePoint() else { return }
-        EffectEngine.shared.trigger(at: point, force: true)
+        EffectEngine.shared.preview(at: point)
     }
     
     @ViewBuilder
@@ -1338,6 +1415,53 @@ struct ControlPanelView: View {
                         }
 
                         SectionCard(icon: "gearshape", title: "选项") {
+                            Toggle("滑动拖尾", isOn: $appState.trailEnabled)
+                                .toggleStyle(.switch)
+                                .tint(.teal)
+                            Text("移动鼠标时留下渐隐光带，可与任意点击效果同时开启；颜色、大小和停留时间沿用上方设置")
+                                .font(.system(size: 11))
+                                .foregroundColor(.white.opacity(0.45))
+
+                            if appState.trailEnabled {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("拖尾样式")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundColor(.white.opacity(0.6))
+                                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                                        ForEach(TrailStyle.allCases) { style in
+                                            Button {
+                                                withAnimation(.easeOut(duration: 0.12)) {
+                                                    appState.trailStyleRaw = style.rawValue
+                                                }
+                                            } label: {
+                                                HStack(spacing: 5) {
+                                                    Image(systemName: style.icon)
+                                                        .font(.system(size: 11, weight: .semibold))
+                                                    Text(style.title)
+                                                        .font(.system(size: 11, weight: .medium))
+                                                }
+                                                .frame(maxWidth: .infinity)
+                                                .padding(.vertical, 7)
+                                                .background(
+                                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                                        .fill(appState.trailStyleRaw == style.rawValue ? Color.teal.opacity(0.26) : Color.white.opacity(0.06))
+                                                )
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                                        .stroke(appState.trailStyleRaw == style.rawValue ? Color.teal.opacity(0.65) : Color.white.opacity(0.08), lineWidth: 1)
+                                                )
+                                                .foregroundColor(appState.trailStyleRaw == style.rawValue ? .white : .white.opacity(0.65))
+                                            }
+                                            .buttonStyle(.plain)
+                                            .help(style.subtitle)
+                                        }
+                                    }
+                                }
+                                .padding(.top, 2)
+                            }
+
+                            Divider().background(Color.white.opacity(0.1))
+
                             Toggle("随机样式", isOn: $appState.randomEffectEnabled)
                                 .toggleStyle(.switch)
                                 .tint(.cyan)
@@ -1870,6 +1994,12 @@ struct Particle: Identifiable {
     var emoji: String
 }
 
+/// 滑动拖尾上的一个采样点，时间用来做「越旧越淡」的衰减。
+struct TrailPoint {
+    var x, y: Double
+    var time: Date
+}
+
 class EffectEngine: ObservableObject {
     /// 面板里的「预览」和覆盖层共用同一个引擎
     static let shared = EffectEngine()
@@ -1877,13 +2007,31 @@ class EffectEngine: ObservableObject {
     /// 全屏连点时的粒子总量上限，超过就丢掉最旧的一批，避免绘制开销拖垮帧率。
     private static let maxParticles = 600
 
+    /// 拖尾的采样点上限：即便拉得很长也只保留最后一小段
+    private static let maxTrailPoints = 180
+
     @Published var particles: [Particle] = []
+    /// 滑动拖尾的轨迹点，按时间从旧到新排列
+    @Published private(set) var trailPoints: [TrailPoint] = []
+
     private var lastClickTime = Date.distantPast
     private var comboLevel = 0
+    private var lastTrailSampleTime = Date.distantPast
+    /// 预览动画用：每次重新预览时自增，旧的一批定时投递就会自动作废
+    private var previewToken = 0
+
+    /// 拖尾在屏幕上停留多久：跟「持续时间」联动，并限制在可看又不过分拖沓的区间
+    var trailLifetime: TimeInterval {
+        min(1.6, max(0.25, AppState.shared.durationMs / 1000.0))
+    }
 
     func trigger(at point: CGPoint, force: Bool = false) {
         let state = AppState.shared
         guard force || (state.isEnabled && !state.isPaused) else { return }
+
+        let effect = state.randomEffectEnabled
+            ? (EffectStyle.allCases.randomElement() ?? .spark)
+            : state.effectStyle.wrappedValue
 
         let now = Date()
         if state.comboBoostEnabled {
@@ -1904,9 +2052,6 @@ class EffectEngine: ObservableObject {
         let intensity = state.comboBoostEnabled
             ? min(1 + Double(max(comboLevel - 1, 0)) * 0.08, 1.4)
             : 1.0
-        let effect = state.randomEffectEnabled
-            ? EffectStyle.allCases.randomElement() ?? .spark
-            : state.effectStyle.wrappedValue
         let count = effect == .emoji
             ? 1
             : min(32, Int((Double(state.particleCount) * intensity).rounded()))
@@ -1932,6 +2077,88 @@ class EffectEngine: ObservableObject {
             particles.removeFirst(min(overflow, particles.count))
         }
         particles.append(contentsOf: newParticles)
+
+        // 点击时顺手补一个拖尾光点：先画光带再点也没关系，两者互不抢占
+        if state.trailEnabled && !force {
+            beginTrail(at: point)
+        }
+    }
+
+    // MARK: 滑动拖尾
+
+    /// 按下鼠标时补一个光点：只点击不移动也能看到反馈，同时结束正在播放的预览动画。
+    func beginTrail(at point: CGPoint) {
+        let state = AppState.shared
+        guard state.trailEnabled, state.isEnabled, !state.isPaused else { return }
+        previewToken &+= 1
+
+        let now = Date()
+        if let last = trailPoints.last,
+           now.timeIntervalSince(last.time) < 0.3,
+           hypot(last.x - point.x, last.y - point.y) < 60 {
+            // 离上一笔很近，接着画，避免在轨迹中间断开
+        } else {
+            trailPoints.removeAll(keepingCapacity: true)
+        }
+        appendTrailPoint(point, at: now)
+        lastTrailSampleTime = now
+    }
+
+    /// 鼠标移动（滑动或拖动）时持续记录轨迹点；只要打开拖尾开关就生效
+    func extendTrail(at point: CGPoint) {
+        let state = AppState.shared
+        guard state.trailEnabled, state.isEnabled, !state.isPaused else { return }
+        previewToken &+= 1
+
+        let now = Date()
+        // 高回报率鼠标一秒能发几百个事件，按 110Hz 采样已经足够顺滑
+        guard now.timeIntervalSince(lastTrailSampleTime) >= 1.0 / 110.0 else { return }
+        if let last = trailPoints.last {
+            let dx = last.x - point.x
+            let dy = last.y - point.y
+            if dx * dx + dy * dy < 4 { return }
+        }
+        lastTrailSampleTime = now
+        appendTrailPoint(point, at: now)
+    }
+
+    private func appendTrailPoint(_ point: CGPoint, at time: Date) {
+        trailPoints.append(TrailPoint(x: point.x, y: point.y, time: time))
+        if trailPoints.count > Self.maxTrailPoints {
+            trailPoints.removeFirst(trailPoints.count - Self.maxTrailPoints)
+        }
+    }
+
+    /// 面板和菜单栏的「预览」：点击效果照常播放；开了拖尾就额外模拟一段滑动。
+    func preview(at point: CGPoint) {
+        if AppState.shared.trailEnabled {
+            previewTrail(at: point)
+        }
+        trigger(at: point, force: true)
+    }
+
+    private func previewTrail(at point: CGPoint) {
+        previewToken &+= 1
+        let token = previewToken
+        trailPoints.removeAll(keepingCapacity: true)
+        lastTrailSampleTime = .distantPast
+
+        let state = AppState.shared
+        let spread = max(40.0, state.particleRadius * state.scale * 3.2)
+        let start = CGPoint(x: point.x - spread, y: point.y + spread * 0.35)
+        let end = CGPoint(x: point.x + spread, y: point.y - spread * 0.35)
+        let steps = 26
+
+        for index in 0...steps {
+            let t = Double(index) / Double(steps)
+            let x = start.x + (end.x - start.x) * t
+            let y = start.y + (end.y - start.y) * t + sin(t * .pi * 1.35) * spread * 0.6
+            // 逐点投递，画出一条从左向右划过的弧线，而不是整条同时出现
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02 + Double(index) * 0.011) { [weak self] in
+                guard let self, self.previewToken == token, AppState.shared.trailEnabled else { return }
+                self.appendTrailPoint(CGPoint(x: x, y: y), at: Date())
+            }
+        }
     }
 
     func cleanUp(currentTime: Date) {
@@ -1940,6 +2167,12 @@ class EffectEngine: ObservableObject {
         // 只有真的清理掉粒子时才重新赋值：否则每帧都会触发一次 @Published 更新。
         if alive.count != particles.count {
             particles = alive
+        }
+
+        let trailLife = trailLifetime
+        let aliveTrail = trailPoints.filter { currentTime.timeIntervalSince($0.time) < trailLife }
+        if aliveTrail.count != trailPoints.count {
+            trailPoints = aliveTrail
         }
     }
 }
@@ -1952,8 +2185,8 @@ struct EffectOverlayView: View {
     @ObservedObject private var accessibility = AccessibilitySettings.shared
 
     var body: some View {
-        // 没有粒子时暂停时间线，避免空闲状态一直 60fps 重绘（省电）
-        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: engine.particles.isEmpty)) { context in
+        // 没有粒子也没有拖尾时暂停时间线，避免空闲状态一直 60fps 重绘（省电）
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: engine.particles.isEmpty && engine.trailPoints.isEmpty)) { context in
             Canvas { ctx, size in
                 let now = context.date
                 let durationSec = appState.durationMs / 1000.0
@@ -1961,7 +2194,17 @@ struct EffectOverlayView: View {
                 let sizeVal = appState.particleSize
                 let radius = appState.particleRadius
                 let scale = appState.scale
-                
+
+                // 拖尾先画，粒子叠在上面
+                drawTrail(
+                    now: now,
+                    color: color,
+                    size: sizeVal,
+                    scale: scale,
+                    style: appState.trailStyle.wrappedValue,
+                    context: ctx
+                )
+
                 for particle in engine.particles {
                     let elapsed = now.timeIntervalSince(particle.startTime)
                     if elapsed >= durationSec { continue }
@@ -1980,13 +2223,25 @@ struct EffectOverlayView: View {
             }
             .onChange(of: context.date) { _, newDate in engine.cleanUp(currentTime: newDate) }
         }
-        .onAppear { mouseMonitor.start(engine: engine) }
+        .onAppear {
+            mouseMonitor.start(engine: engine)
+            syncTrailMotion()
+        }
         .onDisappear { mouseMonitor.stop() }
+        .onChange(of: appState.trailEnabled) { _, _ in syncTrailMotion() }
         .onChange(of: permission.isGranted) { _, granted in
             // 用户在「系统设置」里刚勾上输入监控时，启动阶段注册的监听往往收不到事件，
             // 重建一次监听即可让权限立刻生效，不必重启 App。
-            if granted { mouseMonitor.restart(engine: engine) }
+            if granted {
+                mouseMonitor.restart(engine: engine)
+                syncTrailMotion()
+            }
         }
+    }
+
+    /// 拖尾开关打开时才监听鼠标移动，关闭时不额外占用事件通道
+    private func syncTrailMotion() {
+        mouseMonitor.syncTrailMotion(enabled: appState.trailEnabled, engine: engine)
     }
 
     /// 以 (0,0) 为中心、边长 size 的爱心路径
@@ -2018,6 +2273,403 @@ struct EffectOverlayView: View {
             control2: CGPoint(x: ox + w * 0.64, y: oy + h * 0.02)
         )
         return path
+    }
+
+    private func brushBlockHash(_ date: Date) -> Double {
+        let block = Int(date.timeIntervalSinceReferenceDate * 30.0)
+        return Double(((block &* 2654435761) >> 8) & 255) / 255.0
+    }
+
+    /// 左右两条边围成一条宽度可变的闭合色带，一次填充；避免逐段圆帽在笔身留下“串珠”
+    private func brushRibbon(
+        points: [TrailPoint],
+        widths: [Double],
+        widthScale: Double,
+        offsetFactor: Double
+    ) -> Path {
+        var path = Path()
+        let count = points.count
+        for i in 0..<count {
+            let p = points[i]
+            let prev = points[max(0, i - 1)]
+            let next = points[min(count - 1, i + 1)]
+            let dx = next.x - prev.x
+            let dy = next.y - prev.y
+            let len = max(0.001, sqrt(dx * dx + dy * dy))
+            let nx = -dy / len
+            let ny = dx / len
+            let offset = widths[i] * offsetFactor
+            let half = widths[i] * widthScale * 0.5
+            let wob = sin(p.x * 0.13 + p.y * 0.09) * 0.6
+            let left = CGPoint(x: p.x + nx * (wob + offset + half), y: p.y + ny * (wob + offset + half))
+            if i == 0 { path.move(to: left) } else { path.addLine(to: left) }
+        }
+        for i in (0..<count).reversed() {
+            let p = points[i]
+            let prev = points[max(0, i - 1)]
+            let next = points[min(count - 1, i + 1)]
+            let dx = next.x - prev.x
+            let dy = next.y - prev.y
+            let len = max(0.001, sqrt(dx * dx + dy * dy))
+            let nx = -dy / len
+            let ny = dx / len
+            let offset = widths[i] * offsetFactor
+            let half = widths[i] * widthScale * 0.5
+            let wob = sin(p.x * 0.13 + p.y * 0.09) * 0.6
+            path.addLine(to: CGPoint(x: p.x + nx * (wob + offset - half), y: p.y + ny * (wob + offset - half)))
+        }
+        path.closeSubpath()
+        return path
+    }
+
+    /// 毛笔：整条轨迹一次填充成笔锋，宽度随速度变化，起笔与收笔自然收尖
+    private func drawBrushStroke(
+        now: Date,
+        points: [TrailPoint],
+        color: Color,
+        baseWidth: Double,
+        life: TimeInterval,
+        context: GraphicsContext
+    ) {
+        guard !points.isEmpty else { return }
+
+        if points.count == 1, let only = points.first {
+            let freshness = max(0, 1 - now.timeIntervalSince(only.time) / life)
+            let radius = max(1.2, baseWidth * 0.45 * (0.8 + 0.2 * freshness))
+            var dot = Path()
+            dot.addEllipse(in: CGRect(x: only.x - radius, y: only.y - radius, width: radius * 2, height: radius * 2))
+            context.fill(dot, with: .color(color.opacity(0.8 * freshness)))
+            return
+        }
+
+        let inkWidth = baseWidth * 1.7
+        var widths = [Double](repeating: 0.4, count: points.count)
+        for i in points.indices {
+            let p = points[i]
+            let freshness = max(0, 1 - now.timeIntervalSince(p.time) / life)
+            var speed = 0.0
+            if i > 0 {
+                let prev = points[i - 1]
+                let dt = max(0.001, p.time.timeIntervalSince(prev.time))
+                let dx = p.x - prev.x
+                let dy = p.y - prev.y
+                speed = sqrt(dx * dx + dy * dy) / dt
+            }
+            let speedFactor = min(1.0, speed / 1300.0)
+            let pressure = 1.5 - 1.0 * speedFactor
+            let tailTaper = min(1.0, (Double(i) + 1) / 9.0)
+            let wave = min(1.12, max(0.78,
+                0.95 + 0.10 * sin(p.x * 0.11 + p.y * 0.07) + 0.06 * sin(p.x * 0.23 - p.y * 0.05)))
+            let jitter = 0.92 + 0.16 * brushBlockHash(p.time)
+            widths[i] = max(0.3, inkWidth * pressure * (0.45 + 0.55 * freshness) * tailTaper * wave * jitter)
+        }
+
+        // 墨晕
+        context.fill(
+            brushRibbon(points: points, widths: widths, widthScale: 1.55, offsetFactor: 0),
+            with: .color(color.opacity(0.07))
+        )
+        // 笔身
+        context.fill(
+            brushRibbon(points: points, widths: widths, widthScale: 1.0, offsetFactor: 0),
+            with: .color(color.opacity(0.85))
+        )
+        // 两侧毛锋：贴边一小条，让边缘不那么光滑
+        for side in [-1.0, 1.0] {
+            context.fill(
+                brushRibbon(points: points, widths: widths, widthScale: 0.20, offsetFactor: 0.50 * side),
+                with: .color(color.opacity(0.50))
+            )
+        }
+        // 笔尖积墨，盖住色带末端的平口
+        if let head = points.last {
+            let freshness = max(0, 1 - now.timeIntervalSince(head.time) / life)
+            let radius = max(1.2, widths[widths.count - 1] * 0.55)
+            var dot = Path()
+            dot.addEllipse(in: CGRect(x: head.x - radius, y: head.y - radius, width: radius * 2, height: radius * 2))
+            context.fill(dot, with: .color(color.opacity(0.85 * freshness)))
+        }
+    }
+
+    /// 画滑动拖尾：每段独立淡出，头部再叠一个光点；不同样式用不同笔触
+    private func drawTrail(
+        now: Date,
+        color: Color,
+        size: Double,
+        scale: Double,
+        style: TrailStyle,
+        context: GraphicsContext
+    ) {
+        let points = engine.trailPoints
+        guard let head = points.last else { return }
+
+        let life = engine.trailLifetime
+        let baseWidth = max(2.0, size * 0.42 * scale)
+        // 减弱动态效果时，头部光晕不做呼吸缩放
+        let pulse = accessibility.reduceMotion
+            ? 1.0
+            : 0.88 + 0.12 * sin(now.timeIntervalSinceReferenceDate * 9.0)
+
+        if style == .brush {
+            drawBrushStroke(now: now, points: points, color: color, baseWidth: baseWidth, life: life, context: context)
+            return
+        }
+
+        if points.count > 1 {
+            for index in 1..<points.count {
+                let previous = points[index - 1]
+                let current = points[index]
+                let age = now.timeIntervalSince(current.time)
+                let freshness = max(0, 1 - age / life)
+                if freshness <= 0 { continue }
+
+                let fade = freshness * freshness
+                let width = baseWidth * (0.35 + 0.65 * freshness)
+                // 用采样点自身的时间做种子，避免轨迹被裁剪时星火位置来回跳
+                let pointSeed = Int(current.time.timeIntervalSinceReferenceDate * 1000)
+                var segment = Path()
+                segment.move(to: CGPoint(x: previous.x, y: previous.y))
+                segment.addLine(to: CGPoint(x: current.x, y: current.y))
+
+                // 这一段的方向与法线，彗星的火星和丝带的边缘靠它往两侧偏移
+                let dx = current.x - previous.x
+                let dy = current.y - previous.y
+                let segmentLength = max(0.001, sqrt(dx * dx + dy * dy))
+                let nx = -dy / segmentLength
+                let ny = dx / segmentLength
+
+                switch style {
+                case .classic:
+                    // 平滑变细的实体光带：柔光 + 主体 + 白色亮芯
+                    context.stroke(
+                        segment,
+                        with: .color(color.opacity(0.16 * fade)),
+                        style: StrokeStyle(lineWidth: width * 2.4, lineCap: .round)
+                    )
+                    context.stroke(
+                        segment,
+                        with: .color(color.opacity(0.85 * fade)),
+                        style: StrokeStyle(lineWidth: width, lineCap: .round)
+                    )
+                    context.stroke(
+                        segment,
+                        with: .color(.white.opacity(0.28 * fade)),
+                        style: StrokeStyle(lineWidth: max(1, width * 0.28), lineCap: .round)
+                    )
+                case .brush:
+                    // 毛笔在 drawTrail 开头整条绘制，这里不会走到
+                    break
+                case .neon:
+                    // 霓虹：灯管等宽、整体断续闪烁，外圈始终留一层辉光
+                    let phase = Int(current.time.timeIntervalSinceReferenceDate * 36) % 12
+                    let isLit = phase < 7
+                    let neonFlicker = 0.80 + 0.20 * sin(now.timeIntervalSinceReferenceDate * 33 + Double(pointSeed % 29))
+                    let glowWidth = baseWidth * (isLit ? 3.8 : 2.8)
+                    context.stroke(
+                        segment,
+                        with: .color(color.opacity((isLit ? 0.05 : 0.012) * fade * neonFlicker)),
+                        style: StrokeStyle(lineWidth: glowWidth, lineCap: .round, lineJoin: .round)
+                    )
+                    context.stroke(
+                        segment,
+                        with: .color(color.opacity((isLit ? 0.14 : 0.02) * fade * neonFlicker)),
+                        style: StrokeStyle(lineWidth: glowWidth * 0.55, lineCap: .round)
+                    )
+                    if isLit {
+                        let tube = max(1.8, baseWidth * 0.60)
+                        context.stroke(
+                            segment,
+                            with: .color(color.opacity(0.95 * fade * neonFlicker)),
+                            style: StrokeStyle(lineWidth: tube, lineCap: .round)
+                        )
+                        context.stroke(
+                            segment,
+                            with: .color(.white.opacity(0.85 * fade * neonFlicker)),
+                            style: StrokeStyle(lineWidth: max(0.8, tube * 0.38), lineCap: .round)
+                        )
+                    }
+                case .comet:
+                    // 彗星：细亮脊 + 柔和尾焰，火星以不同速度往后下方散落
+                    let plume = baseWidth * (0.5 + 0.8 * (1 - freshness))
+                    context.stroke(
+                        segment,
+                        with: .color(color.opacity(0.08 * fade)),
+                        style: StrokeStyle(lineWidth: plume * 1.6, lineCap: .round)
+                    )
+                    context.stroke(
+                        segment,
+                        with: .color(color.opacity(0.28 * fade)),
+                        style: StrokeStyle(lineWidth: plume, lineCap: .round)
+                    )
+                    context.stroke(
+                        segment,
+                        with: .color(.white.opacity(0.75 * fade)),
+                        style: StrokeStyle(lineWidth: max(1.0, baseWidth * 0.28), lineCap: .round)
+                    )
+                    if pointSeed % 4 == 0 {
+                        let driftSpeed = 18.0 + Double(abs((pointSeed * 7) % 30))
+                        let drift = max(0, age - 0.03) * driftSpeed
+                        let lateral = sin(Double((pointSeed / 4) % 360) * .pi / 180) * baseWidth * 1.9
+                        let sparkRadius = max(0.7, baseWidth * 0.26 * (0.5 + 0.5 * freshness))
+                        var spark = Path()
+                        spark.addEllipse(in: CGRect(
+                            x: current.x + nx * lateral - sparkRadius,
+                            y: current.y + ny * lateral + drift - sparkRadius,
+                            width: sparkRadius * 2,
+                            height: sparkRadius * 2
+                        ))
+                        context.fill(spark, with: .color(color.opacity(0.65 * fade)))
+                    }
+                case .ribbon:
+                    // 丝带：宽而半透明的带面，宽度随采样点起伏，边缘更亮一些
+                    let wobble = sin(Double(pointSeed) / 120.0) * width * 0.5
+                    let bandWidth = max(width * 1.8, width * 2.8 + wobble)
+                    context.stroke(
+                        segment,
+                        with: .color(color.opacity(0.16 * fade)),
+                        style: StrokeStyle(lineWidth: bandWidth, lineCap: .round, lineJoin: .round)
+                    )
+                    context.stroke(
+                        segment,
+                        with: .color(color.opacity(0.30 * fade)),
+                        style: StrokeStyle(lineWidth: bandWidth * 0.55, lineCap: .round)
+                    )
+                    let edgeOffset = bandWidth * 0.5
+                    for side in [-1.0, 1.0] {
+                        var edge = Path()
+                        edge.move(to: CGPoint(
+                            x: previous.x + nx * edgeOffset * side,
+                            y: previous.y + ny * edgeOffset * side
+                        ))
+                        edge.addLine(to: CGPoint(
+                            x: current.x + nx * edgeOffset * side,
+                            y: current.y + ny * edgeOffset * side
+                        ))
+                        context.stroke(
+                            edge,
+                            with: .color(color.opacity(0.45 * fade)),
+                            style: StrokeStyle(lineWidth: 1, lineCap: .round)
+                        )
+                    }
+                case .stardust:
+                    // 不画连续线，只留下大小不一的光点
+                    let dotRadius = max(0.6, width * 0.32 + baseWidth * 0.12 * freshness)
+                    var dot = Path()
+                    dot.addEllipse(in: CGRect(
+                        x: current.x - dotRadius,
+                        y: current.y - dotRadius,
+                        width: dotRadius * 2,
+                        height: dotRadius * 2
+                    ))
+                    context.fill(dot, with: .color(color.opacity(0.75 * fade)))
+                    if pointSeed % 6 == 0 {
+                        let sparkRadius = dotRadius * 0.55
+                        var spark = Path()
+                        spark.addEllipse(in: CGRect(
+                            x: current.x - sparkRadius,
+                            y: current.y - sparkRadius,
+                            width: sparkRadius * 2,
+                            height: sparkRadius * 2
+                        ))
+                        context.fill(spark, with: .color(.white.opacity(0.6 * fade)))
+                    }
+                }
+            }
+        }
+
+        // 毛笔只留一点笔尖积墨，不做发光球
+        if style == .brush {
+            let brushHeadFreshness = max(0, 1 - now.timeIntervalSince(head.time) / life)
+            if brushHeadFreshness > 0 {
+                let dotRadius = max(1.4, baseWidth * 0.45 * (0.80 + 0.30 * brushHeadFreshness))
+                var dot = Path()
+                dot.addEllipse(in: CGRect(
+                    x: head.x - dotRadius,
+                    y: head.y - dotRadius,
+                    width: dotRadius * 2,
+                    height: dotRadius * 2
+                ))
+                context.fill(dot, with: .color(color.opacity(0.70 * brushHeadFreshness)))
+            }
+            return
+        }
+
+        // 头部光点：即使只是单击、没有移动，也能看到一下亮光
+        let headFreshness = max(0, 1 - now.timeIntervalSince(head.time) / life)
+        if headFreshness > 0 {
+            let center = CGPoint(x: head.x, y: head.y)
+            let headFactor: Double
+            switch style {
+            case .classic: headFactor = 1.15
+            case .brush: headFactor = 0.9
+            case .neon: headFactor = 0.75
+            case .comet: headFactor = 1.85
+            case .ribbon: headFactor = 0.7
+            case .stardust: headFactor = 1.3
+            }
+            let haloScale: Double
+            switch style {
+            case .comet: haloScale = 3.6
+            case .ribbon: haloScale = 2.2
+            case .neon: haloScale = 2.2
+            default: haloScale = 2.6
+            }
+            let sparkOpacity: Double
+            switch style {
+            case .neon: sparkOpacity = 0.95
+            case .ribbon: sparkOpacity = 0.2
+            case .comet: sparkOpacity = 0.9
+            default: sparkOpacity = 0.75
+            }
+            let radius = max(3.0, baseWidth * headFactor) * (0.7 + 0.3 * headFreshness) * pulse
+            var halo = Path()
+            halo.addEllipse(in: CGRect(
+                x: center.x - radius * haloScale,
+                y: center.y - radius * haloScale,
+                width: radius * haloScale * 2,
+                height: radius * haloScale * 2
+            ))
+            context.fill(halo, with: .radialGradient(
+                Gradient(colors: [color.opacity(0.42 * headFreshness), color.opacity(0)]),
+                center: center,
+                startRadius: 0,
+                endRadius: radius * haloScale
+            ))
+
+            var core = Path()
+            core.addEllipse(in: CGRect(
+                x: center.x - radius,
+                y: center.y - radius,
+                width: radius * 2,
+                height: radius * 2
+            ))
+            context.fill(core, with: .color(color.opacity(0.9 * headFreshness)))
+
+            let sparkRadius = max(1.2, radius * 0.42)
+            var spark = Path()
+            spark.addEllipse(in: CGRect(
+                x: center.x - sparkRadius,
+                y: center.y - sparkRadius,
+                width: sparkRadius * 2,
+                height: sparkRadius * 2
+            ))
+            context.fill(spark, with: .color(.white.opacity(sparkOpacity * headFreshness)))
+
+            // 彗核加一点十字星芒，和普通光点区分开
+            if style == .comet {
+                let flareLength = radius * 2.8
+                var flare = Path()
+                flare.move(to: CGPoint(x: center.x - flareLength, y: center.y))
+                flare.addLine(to: CGPoint(x: center.x + flareLength, y: center.y))
+                flare.move(to: CGPoint(x: center.x, y: center.y - flareLength))
+                flare.addLine(to: CGPoint(x: center.x, y: center.y + flareLength))
+                context.stroke(
+                    flare,
+                    with: .color(.white.opacity(0.40 * headFreshness)),
+                    style: StrokeStyle(lineWidth: 1, lineCap: .round)
+                )
+            }
+        }
     }
 
     private func drawEffect(
@@ -2327,6 +2979,10 @@ struct EffectOverlayView: View {
 final class GlobalMouseMonitor: ObservableObject {
     private var globalMonitor: Any?
     private var localMonitor: Any?
+    private var motionGlobalMonitor: Any?
+    private var motionLocalMonitor: Any?
+    /// 记录当前是否需要移动监听，权限变化重建时好恢复
+    private var isTrailMotionActive = false
 
     func start(engine: EffectEngine) {
         guard globalMonitor == nil, localMonitor == nil else { return }
@@ -2359,6 +3015,58 @@ final class GlobalMouseMonitor: ObservableObject {
         }
     }
 
+    /// 拖尾开关打开时才安装移动监听，关闭时及时释放事件通道
+    func syncTrailMotion(enabled: Bool, engine: EffectEngine) {
+        isTrailMotionActive = enabled
+        if enabled {
+            startTrailMotion(engine: engine)
+        } else {
+            stopTrailMotion()
+        }
+    }
+
+    private func startTrailMotion(engine: EffectEngine) {
+        guard motionGlobalMonitor == nil, motionLocalMonitor == nil else { return }
+
+        let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged]
+
+        motionGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak engine] event in
+            guard Self.supportsMotion(event) else { return }
+            DispatchQueue.main.async {
+                guard let point = OverlayGeometry.mousePoint() else { return }
+                engine?.extendTrail(at: point)
+            }
+        }
+
+        motionLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak engine] event in
+            if Self.supportsMotion(event), let point = OverlayGeometry.mousePoint() {
+                engine?.extendTrail(at: point)
+            }
+            return event
+        }
+    }
+
+    private func stopTrailMotion() {
+        if let motionGlobalMonitor {
+            NSEvent.removeMonitor(motionGlobalMonitor)
+            self.motionGlobalMonitor = nil
+        }
+        if let motionLocalMonitor {
+            NSEvent.removeMonitor(motionLocalMonitor)
+            self.motionLocalMonitor = nil
+        }
+    }
+
+    /// 拖动右键 / 中键是否也留拖尾，和点击效果用同一个开关
+    private static func supportsMotion(_ event: NSEvent) -> Bool {
+        switch event.type {
+        case .rightMouseDragged, .otherMouseDragged:
+            return AppState.shared.rightClickEnabled
+        default:
+            return true
+        }
+    }
+
     func stop() {
         if let globalMonitor {
             NSEvent.removeMonitor(globalMonitor)
@@ -2368,11 +3076,17 @@ final class GlobalMouseMonitor: ObservableObject {
             NSEvent.removeMonitor(localMonitor)
             self.localMonitor = nil
         }
+        stopTrailMotion()
+        isTrailMotionActive = false
     }
 
     /// 输入监控权限变化后重建监听：早期注册的监听不会随权限自动开始投递事件。
     func restart(engine: EffectEngine) {
+        let trailWasActive = isTrailMotionActive
         stop()
         start(engine: engine)
+        if trailWasActive {
+            syncTrailMotion(enabled: true, engine: engine)
+        }
     }
 }
