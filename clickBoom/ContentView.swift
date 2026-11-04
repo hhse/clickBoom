@@ -618,11 +618,11 @@ nonisolated private func clickBoomHotKeyHandler(
 // MARK: - 应用信息
 enum AppInfo {
     static var shortVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.8"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.9"
     }
 
     static var buildNumber: String {
-        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "10"
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "11"
     }
 
     static var version: String {
@@ -1936,6 +1936,7 @@ struct SectionCard<Content: View>: View {
                 content
             }
             .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.white.opacity(0.05))
             .cornerRadius(12)
             .overlay(
