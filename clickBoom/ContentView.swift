@@ -187,6 +187,14 @@ struct PresetSnapshot: Codable, Identifiable, Equatable {
     var durationMs: Double
     var scale: Double
     var emoji: String
+    // 拖尾参数是 1.1.8 才加入的：全部可选，旧预设解码时缺字段也不会失败。
+    var trailEnabled: Bool? = nil
+    var trailStyle: String? = nil
+    var trailColorHex: String? = nil
+    var trailFollowsColor: Bool? = nil
+    var trailWidth: Double? = nil
+    var trailOpacity: Double? = nil
+    var trailLifetimeMs: Double? = nil
 }
 
 // MARK: - 1. 全局状态管理 (AppState)
@@ -207,6 +215,11 @@ class AppState: NSObject, ObservableObject {
         static let randomEffectEnabled = "randomEffectEnabled"
         static let trailEnabled = "trailEnabled"
         static let trailStyleRaw = "trailStyle"
+        static let trailColorHex = "trailColorHex"
+        static let trailFollowsColor = "trailFollowsColor"
+        static let trailWidth = "trailWidth"
+        static let trailOpacity = "trailOpacity"
+        static let trailLifetimeMs = "trailLifetime"
         static let comboBoostEnabled = "comboBoostEnabled"
         static let customEmoji = "customEmoji"
         static let rightClickEnabled = "rightClickEnabled"
@@ -247,9 +260,27 @@ class AppState: NSObject, ObservableObject {
     @Published var trailEnabled: Bool = false {
         didSet { defaults.set(trailEnabled, forKey: Key.trailEnabled) }
     }
-    /// 拖尾样式：光带 / 霓虹 / 彗星 / 丝带 / 星尘
+    /// 拖尾样式：光带 / 毛笔 / 霓虹 / 彗星 / 丝带 / 星尘
     @Published var trailStyleRaw: String = TrailStyle.classic.rawValue {
         didSet { defaults.set(trailStyleRaw, forKey: Key.trailStyleRaw) }
+    }
+    @Published var trailColorHex: String = "#FFFFFF" {
+        didSet { defaults.set(trailColorHex, forKey: Key.trailColorHex) }
+    }
+    /// 默认跟随点击效果的颜色，关掉后使用拖尾自己的颜色
+    @Published var trailFollowsColor: Bool = true {
+        didSet { defaults.set(trailFollowsColor, forKey: Key.trailFollowsColor) }
+    }
+    /// 拖尾基准宽度（点）；实际绘制时再乘样式系数和全局缩放
+    @Published var trailWidth: Double = 10.0 {
+        didSet { defaults.set(trailWidth, forKey: Key.trailWidth) }
+    }
+    @Published var trailOpacity: Double = 1.0 {
+        didSet { defaults.set(trailOpacity, forKey: Key.trailOpacity) }
+    }
+    /// 拖尾停留时长（毫秒），与点击效果的 durationMs 解耦
+    @Published var trailLifetimeMs: Double = 400.0 {
+        didSet { defaults.set(trailLifetimeMs, forKey: Key.trailLifetimeMs) }
     }
     @Published var comboBoostEnabled: Bool = false {
         didSet { defaults.set(comboBoostEnabled, forKey: Key.comboBoostEnabled) }
@@ -299,6 +330,11 @@ class AppState: NSObject, ObservableObject {
            TrailStyle(rawValue: value) != nil {
             trailStyleRaw = value
         }
+        if let value = d.string(forKey: Key.trailColorHex) { trailColorHex = value }
+        if let value = d.object(forKey: Key.trailFollowsColor) as? Bool { trailFollowsColor = value }
+        if let value = d.object(forKey: Key.trailWidth) as? NSNumber { trailWidth = value.doubleValue }
+        if let value = d.object(forKey: Key.trailOpacity) as? NSNumber { trailOpacity = value.doubleValue }
+        if let value = d.object(forKey: Key.trailLifetimeMs) as? NSNumber { trailLifetimeMs = value.doubleValue }
         if let value = d.object(forKey: Key.comboBoostEnabled) as? Bool { comboBoostEnabled = value }
         if let value = d.string(forKey: Key.customEmoji) { customEmoji = value }
         if let value = d.object(forKey: Key.rightClickEnabled) as? Bool { rightClickEnabled = value }
@@ -320,6 +356,18 @@ class AppState: NSObject, ObservableObject {
         Binding(
             get: { TrailStyle(rawValue: self.trailStyleRaw) ?? .classic },
             set: { self.trailStyleRaw = $0.rawValue }
+        )
+    }
+
+    var trailColor: Color {
+        let hex = trailFollowsColor ? effectColorHex : trailColorHex
+        return Color(hex: hex) ?? .white
+    }
+
+    var trailColorBinding: Binding<Color> {
+        Binding(
+            get: { Color(hex: self.trailColorHex) ?? .white },
+            set: { self.trailColorHex = $0.toHex() ?? "#FFFFFF" }
         )
     }
 
@@ -427,6 +475,13 @@ class AppState: NSObject, ObservableObject {
         durationMs = preset.durationMs
         scale = preset.scale
         customEmoji = preset.emoji
+        if let enabled = preset.trailEnabled { trailEnabled = enabled }
+        if let style = preset.trailStyle, TrailStyle(rawValue: style) != nil { trailStyleRaw = style }
+        if let color = preset.trailColorHex { trailColorHex = color }
+        if let follows = preset.trailFollowsColor { trailFollowsColor = follows }
+        if let width = preset.trailWidth { trailWidth = width }
+        if let opacity = preset.trailOpacity { trailOpacity = opacity }
+        if let lifetime = preset.trailLifetimeMs { trailLifetimeMs = lifetime }
         randomEffectEnabled = false
         comboCount = 0
     }
@@ -444,7 +499,14 @@ class AppState: NSObject, ObservableObject {
             radius: particleRadius,
             durationMs: durationMs,
             scale: scale,
-            emoji: customEmoji
+            emoji: customEmoji,
+            trailEnabled: trailEnabled,
+            trailStyle: trailStyleRaw,
+            trailColorHex: trailColorHex,
+            trailFollowsColor: trailFollowsColor,
+            trailWidth: trailWidth,
+            trailOpacity: trailOpacity,
+            trailLifetimeMs: trailLifetimeMs
         )
         if let index = savedPresets.firstIndex(where: { $0.name == finalName }) {
             savedPresets[index] = snapshot
@@ -470,6 +532,11 @@ class AppState: NSObject, ObservableObject {
         randomEffectEnabled = false
         trailEnabled = false
         trailStyleRaw = TrailStyle.classic.rawValue
+        trailColorHex = "#FFFFFF"
+        trailFollowsColor = true
+        trailWidth = 10
+        trailOpacity = 1.0
+        trailLifetimeMs = 400
         comboBoostEnabled = false
         customEmoji = "✨"
         rightClickEnabled = true
@@ -551,11 +618,11 @@ nonisolated private func clickBoomHotKeyHandler(
 // MARK: - 应用信息
 enum AppInfo {
     static var shortVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.7"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.8"
     }
 
     static var buildNumber: String {
-        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "9"
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "10"
     }
 
     static var version: String {
@@ -1161,6 +1228,11 @@ struct ControlPanelView: View {
         guard let point = OverlayGeometry.mousePoint() else { return }
         EffectEngine.shared.preview(at: point)
     }
+
+    private func previewTrail() {
+        guard let point = OverlayGeometry.mousePoint() else { return }
+        EffectEngine.shared.previewTrailOnly(at: point)
+    }
     
     @ViewBuilder
     private var updateStatusRow: some View {
@@ -1414,54 +1486,88 @@ struct ControlPanelView: View {
                             ModernSlider(label: "缩放", value: $appState.scale, range: 0.5...5.0, icon: "arrow.up.left.and.arrow.down.right", format: "%.1f 倍")
                         }
 
-                        SectionCard(icon: "gearshape", title: "选项") {
+                        SectionCard(icon: "scribble.variable", title: "拖尾") {
                             Toggle("滑动拖尾", isOn: $appState.trailEnabled)
                                 .toggleStyle(.switch)
                                 .tint(.teal)
-                            Text("移动鼠标时留下渐隐光带，可与任意点击效果同时开启；颜色、大小和停留时间沿用上方设置")
+                            Text("移动鼠标时留下渐隐光带，可与任意点击效果同时开启")
                                 .font(.system(size: 11))
                                 .foregroundColor(.white.opacity(0.45))
 
                             if appState.trailEnabled {
-                                VStack(alignment: .leading, spacing: 8) {
+                                HStack {
                                     Text("拖尾样式")
                                         .font(.system(size: 11, weight: .semibold))
                                         .foregroundColor(.white.opacity(0.6))
-                                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                                        ForEach(TrailStyle.allCases) { style in
-                                            Button {
-                                                withAnimation(.easeOut(duration: 0.12)) {
-                                                    appState.trailStyleRaw = style.rawValue
-                                                }
-                                            } label: {
-                                                HStack(spacing: 5) {
-                                                    Image(systemName: style.icon)
-                                                        .font(.system(size: 11, weight: .semibold))
-                                                    Text(style.title)
-                                                        .font(.system(size: 11, weight: .medium))
-                                                }
-                                                .frame(maxWidth: .infinity)
-                                                .padding(.vertical, 7)
-                                                .background(
-                                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                                        .fill(appState.trailStyleRaw == style.rawValue ? Color.teal.opacity(0.26) : Color.white.opacity(0.06))
-                                                )
-                                                .overlay(
-                                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                                        .stroke(appState.trailStyleRaw == style.rawValue ? Color.teal.opacity(0.65) : Color.white.opacity(0.08), lineWidth: 1)
-                                                )
-                                                .foregroundColor(appState.trailStyleRaw == style.rawValue ? .white : .white.opacity(0.65))
+                                    Spacer()
+                                    Button {
+                                        previewTrail()
+                                    } label: {
+                                        Label("预览", systemImage: "play.circle")
+                                            .font(.system(size: 11, weight: .medium))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .foregroundColor(.teal)
+                                    .help("在当前鼠标位置播放一段拖尾")
+                                }
+
+                                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                                    ForEach(TrailStyle.allCases) { style in
+                                        Button {
+                                            withAnimation(.easeOut(duration: 0.12)) {
+                                                appState.trailStyleRaw = style.rawValue
                                             }
-                                            .buttonStyle(.plain)
-                                            .help(style.subtitle)
+                                        } label: {
+                                            HStack(spacing: 5) {
+                                                Image(systemName: style.icon)
+                                                    .font(.system(size: 11, weight: .semibold))
+                                                Text(style.title)
+                                                    .font(.system(size: 11, weight: .medium))
+                                            }
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 7)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                                    .fill(appState.trailStyleRaw == style.rawValue ? Color.teal.opacity(0.26) : Color.white.opacity(0.06))
+                                            )
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                                    .stroke(appState.trailStyleRaw == style.rawValue ? Color.teal.opacity(0.65) : Color.white.opacity(0.08), lineWidth: 1)
+                                            )
+                                            .foregroundColor(appState.trailStyleRaw == style.rawValue ? .white : .white.opacity(0.65))
                                         }
+                                        .buttonStyle(.plain)
+                                        .help(style.subtitle)
                                     }
                                 }
-                                .padding(.top, 2)
+
+                                Divider().background(Color.white.opacity(0.1))
+
+                                Toggle("跟随点击颜色", isOn: $appState.trailFollowsColor)
+                                    .toggleStyle(.switch)
+                                    .tint(.teal)
+                                Text("关闭后可给拖尾单独选颜色")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.white.opacity(0.45))
+
+                                if !appState.trailFollowsColor {
+                                    HStack {
+                                        Text("拖尾颜色")
+                                            .font(.system(size: 13, weight: .medium))
+                                            .foregroundColor(.white.opacity(0.8))
+                                        Spacer()
+                                        ColorPicker("", selection: appState.trailColorBinding)
+                                            .labelsHidden()
+                                    }
+                                }
+
+                                ModernSlider(label: "粗细", value: $appState.trailWidth, range: 2...30, icon: "lineweight", format: "%.0f")
+                                ModernSlider(label: "透明度", value: Binding(get: { appState.trailOpacity * 100 }, set: { appState.trailOpacity = $0 / 100 }), range: 20...100, icon: "circle.lefthalf.filled", format: "%.0f%%")
+                                ModernSlider(label: "停留", value: $appState.trailLifetimeMs, range: 200...2000, icon: "hourglass", format: "%.0f 毫秒")
                             }
+                        }
 
-                            Divider().background(Color.white.opacity(0.1))
-
+                        SectionCard(icon: "gearshape", title: "选项") {
                             Toggle("随机样式", isOn: $appState.randomEffectEnabled)
                                 .toggleStyle(.switch)
                                 .tint(.cyan)
@@ -2020,9 +2126,9 @@ class EffectEngine: ObservableObject {
     /// 预览动画用：每次重新预览时自增，旧的一批定时投递就会自动作废
     private var previewToken = 0
 
-    /// 拖尾在屏幕上停留多久：跟「持续时间」联动，并限制在可看又不过分拖沓的区间
+    /// 拖尾在屏幕上停留多久：由拖尾自己的「停留时长」决定，与点击效果解耦
     var trailLifetime: TimeInterval {
-        min(1.6, max(0.25, AppState.shared.durationMs / 1000.0))
+        min(2.5, max(0.15, AppState.shared.trailLifetimeMs / 1000.0))
     }
 
     func trigger(at point: CGPoint, force: Bool = false) {
@@ -2137,6 +2243,12 @@ class EffectEngine: ObservableObject {
         trigger(at: point, force: true)
     }
 
+    /// 只播放拖尾动画，不触发点击效果：面板里的「预览拖尾」按钮用
+    func previewTrailOnly(at point: CGPoint) {
+        guard AppState.shared.trailEnabled else { return }
+        previewTrail(at: point)
+    }
+
     private func previewTrail(at point: CGPoint) {
         previewToken &+= 1
         let token = previewToken
@@ -2195,15 +2307,17 @@ struct EffectOverlayView: View {
                 let radius = appState.particleRadius
                 let scale = appState.scale
 
-                // 拖尾先画，粒子叠在上面
+                // 拖尾先画，粒子叠在上面；透明度只作用于拖尾，不拖累点击效果
+                ctx.opacity = appState.trailOpacity
                 drawTrail(
                     now: now,
-                    color: color,
-                    size: sizeVal,
+                    color: appState.trailColor,
+                    size: appState.trailWidth,
                     scale: scale,
                     style: appState.trailStyle.wrappedValue,
                     context: ctx
                 )
+                ctx.opacity = 1
 
                 for particle in engine.particles {
                     let elapsed = now.timeIntervalSince(particle.startTime)
@@ -2391,6 +2505,42 @@ struct EffectOverlayView: View {
         }
     }
 
+    /// Catmull-Rom 平滑：只对拉得开的采样点做自适应细分，时间线性插值保证速度不变
+    private func smoothedTrail(_ points: [TrailPoint]) -> [TrailPoint] {
+        guard points.count > 2 else { return points }
+        var result: [TrailPoint] = []
+        result.reserveCapacity(points.count * 2)
+        for index in 0..<(points.count - 1) {
+            let p0 = points[max(0, index - 1)]
+            let p1 = points[index]
+            let p2 = points[index + 1]
+            let p3 = points[min(points.count - 1, index + 2)]
+            let dx = p2.x - p1.x
+            let dy = p2.y - p1.y
+            let distance = sqrt(dx * dx + dy * dy)
+            let steps = max(1, min(3, Int(ceil(distance / 10.0))))
+            let span = p2.time.timeIntervalSince(p1.time)
+            for step in 0..<steps {
+                let t = Double(step) / Double(steps)
+                result.append(TrailPoint(
+                    x: catmullRom(p0.x, p1.x, p2.x, p3.x, t),
+                    y: catmullRom(p0.y, p1.y, p2.y, p3.y, t),
+                    time: p1.time.addingTimeInterval(span * t)
+                ))
+            }
+        }
+        if let last = points.last {
+            result.append(last)
+        }
+        return result
+    }
+
+    private func catmullRom(_ p0: Double, _ p1: Double, _ p2: Double, _ p3: Double, _ t: Double) -> Double {
+        let t2 = t * t
+        let t3 = t2 * t
+        return 0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3)
+    }
+
     /// 画滑动拖尾：每段独立淡出，头部再叠一个光点；不同样式用不同笔触
     private func drawTrail(
         now: Date,
@@ -2400,7 +2550,7 @@ struct EffectOverlayView: View {
         style: TrailStyle,
         context: GraphicsContext
     ) {
-        let points = engine.trailPoints
+        let points = smoothedTrail(engine.trailPoints)
         guard let head = points.last else { return }
 
         let life = engine.trailLifetime
