@@ -618,11 +618,11 @@ nonisolated private func clickBoomHotKeyHandler(
 // MARK: - 应用信息
 enum AppInfo {
     static var shortVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.9"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.10"
     }
 
     static var buildNumber: String {
-        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "11"
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "12"
     }
 
     static var version: String {
@@ -1487,12 +1487,22 @@ struct ControlPanelView: View {
                         }
 
                         SectionCard(icon: "scribble.variable", title: "拖尾") {
-                            Toggle("滑动拖尾", isOn: $appState.trailEnabled)
-                                .toggleStyle(.switch)
-                                .tint(.teal)
+                            HStack(spacing: 8) {
+                                Spacer(minLength: 0)
+                                Text("滑动拖尾")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.8))
+                                Toggle("", isOn: $appState.trailEnabled)
+                                    .labelsHidden()
+                                    .toggleStyle(.switch)
+                                    .tint(.teal)
+                                Spacer(minLength: 0)
+                            }
                             Text("移动鼠标时留下渐隐光带，可与任意点击效果同时开启")
                                 .font(.system(size: 11))
                                 .foregroundColor(.white.opacity(0.45))
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: .infinity)
 
                             if appState.trailEnabled {
                                 HStack {
@@ -1936,7 +1946,7 @@ struct SectionCard<Content: View>: View {
                 content
             }
             .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
             .background(Color.white.opacity(0.05))
             .cornerRadius(12)
             .overlay(
