@@ -4,6 +4,12 @@
 
 项目使用 SwiftUI 和 macOS 原生 API 编写，不依赖第三方运行库。
 
+## 📸 界面预览
+
+<p align="center">
+  <img src="docs/images/clickboom-menu-preview.png" alt="ClickBoom 菜单栏快速面板" width="396">
+</p>
+
 ## ✨ 功能特性
 
 - 全局监听鼠标点击与滑动（左键、右键与中键，右键/中键可单独关闭）
