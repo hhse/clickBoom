@@ -618,11 +618,11 @@ nonisolated private func clickBoomHotKeyHandler(
 // MARK: - 应用信息
 enum AppInfo {
     static var shortVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.10"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.11"
     }
 
     static var buildNumber: String {
-        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "12"
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "13"
     }
 
     static var version: String {
@@ -637,7 +637,7 @@ final class UpdateChecker: ObservableObject {
         case idle
         case checking
         case latest
-        case available(String, URL?)
+        case available(version: String, downloadURL: URL?, pageURL: URL?)
         case failed(String)
     }
 
@@ -678,8 +678,15 @@ final class UpdateChecker: ObservableObject {
                let tag = json["tag_name"] as? String {
                 let remote = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
                 let page = (json["html_url"] as? String).flatMap(URL.init(string:))
+                let download = (json["assets"] as? [[String: Any]])?
+                    .first { asset in
+                        (asset["name"] as? String)?.lowercased().hasSuffix(".dmg") == true
+                    }
+                    .flatMap { asset in
+                        (asset["browser_download_url"] as? String).flatMap(URL.init(string:))
+                    }
                 result = Self.isNewer(remote, than: AppInfo.shortVersion)
-                    ? .available(remote, page)
+                    ? .available(version: remote, downloadURL: download, pageURL: page)
                     : .latest
             } else if let error {
                 result = .failed(error.localizedDescription)
@@ -690,13 +697,15 @@ final class UpdateChecker: ObservableObject {
         }.resume()
     }
 
-    func openDownloadPage() {
-        if case let .available(_, url) = status, let url {
-            NSWorkspace.shared.open(url)
+    func openDownload() {
+        if case let .available(_, downloadURL, pageURL) = status {
+            NSWorkspace.shared.open(downloadURL ?? pageURL ?? latestReleasesURL)
         } else {
-            NSWorkspace.shared.open(URL(string: "https://github.com/hhse/clickBoom/releases")!)
+            NSWorkspace.shared.open(latestReleasesURL)
         }
     }
+
+    private let latestReleasesURL = URL(string: "https://github.com/hhse/clickBoom/releases")!
 
     /// 逐段比较版本号，缺位补 0
     nonisolated static func isNewer(_ remote: String, than local: String) -> Bool {
@@ -1138,9 +1147,19 @@ struct MenuBarQuickPanel: View {
 
                 Spacer()
 
-                Text(updateStatusText)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
+                if case let .available(version, _, _) = update.status {
+                    Button {
+                        update.openDownload()
+                    } label: {
+                        Label("下载 \(version)", systemImage: "arrow.down.circle.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .buttonStyle(.link)
+                } else {
+                    Text(updateStatusText)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
 
                 Text("v\(AppInfo.version)")
                     .font(.system(size: 9, design: .monospaced))
@@ -1167,7 +1186,7 @@ struct MenuBarQuickPanel: View {
         case .idle: return ""
         case .checking: return "检查中…"
         case .latest: return "已是最新"
-        case .available(let version, _): return "有新版本 \(version)"
+        case .available(let version, _, _): return "有新版本 \(version)"
         case .failed: return "检查失败"
         }
     }
@@ -1247,13 +1266,13 @@ struct ControlPanelView: View {
             Label("已是最新版本", systemImage: "checkmark.circle.fill")
                 .font(.system(size: 11))
                 .foregroundColor(.green)
-        case .available(let version, _):
+        case .available(let version, _, _):
             HStack(spacing: 8) {
                 Label("发现新版本 \(version)", systemImage: "sparkles")
                     .font(.system(size: 11))
                     .foregroundColor(.orange)
                 Spacer()
-                Button("前往下载") { update.openDownloadPage() }
+                Button("下载新版本") { update.openDownload() }
                     .buttonStyle(.link)
                     .font(.system(size: 11))
             }
