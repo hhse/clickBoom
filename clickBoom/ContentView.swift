@@ -114,6 +114,57 @@ enum TrailStyle: String, CaseIterable, Identifiable {
     }
 }
 
+enum TrailTriggerMode: String, CaseIterable, Identifiable {
+    case always
+    case dragging
+    case optionKey
+    case commandKey
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .always: return "始终跟随"
+        case .dragging: return "仅拖动时"
+        case .optionKey: return "按住 Option"
+        case .commandKey: return "按住 Command"
+        }
+    }
+}
+
+enum MouseButtonKind: String {
+    case left
+    case right
+    case middle
+}
+
+enum ScenePreset: String, CaseIterable, Identifiable {
+    case tutorial
+    case recording
+    case live
+    case minimal
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .tutorial: return "教程"
+        case .recording: return "录屏"
+        case .live: return "直播"
+        case .minimal: return "极简"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .tutorial: return "graduationcap.fill"
+        case .recording: return "record.circle"
+        case .live: return "dot.radiowaves.left.and.right"
+        case .minimal: return "circle"
+        }
+    }
+}
+
 enum EffectPreset: String, CaseIterable, Identifiable {
     case standard
     case blue
@@ -195,6 +246,15 @@ struct PresetSnapshot: Codable, Identifiable, Equatable {
     var trailWidth: Double? = nil
     var trailOpacity: Double? = nil
     var trailLifetimeMs: Double? = nil
+    // 1.2 演示增强参数保持可选，旧预设仍可正常解码。
+    var trailTriggerMode: String? = nil
+    var spotlightEnabled: Bool? = nil
+    var spotlightColorHex: String? = nil
+    var spotlightSize: Double? = nil
+    var spotlightOpacity: Double? = nil
+    var distinguishMouseButtons: Bool? = nil
+    var rightClickColorHex: String? = nil
+    var middleClickColorHex: String? = nil
 }
 
 // MARK: - 1. 全局状态管理 (AppState)
@@ -220,6 +280,14 @@ class AppState: NSObject, ObservableObject {
         static let trailWidth = "trailWidth"
         static let trailOpacity = "trailOpacity"
         static let trailLifetimeMs = "trailLifetime"
+        static let trailTriggerModeRaw = "trailTriggerMode"
+        static let spotlightEnabled = "spotlightEnabled"
+        static let spotlightColorHex = "spotlightColorHex"
+        static let spotlightSize = "spotlightSize"
+        static let spotlightOpacity = "spotlightOpacity"
+        static let distinguishMouseButtons = "distinguishMouseButtons"
+        static let rightClickColorHex = "rightClickColorHex"
+        static let middleClickColorHex = "middleClickColorHex"
         static let comboBoostEnabled = "comboBoostEnabled"
         static let customEmoji = "customEmoji"
         static let rightClickEnabled = "rightClickEnabled"
@@ -282,6 +350,30 @@ class AppState: NSObject, ObservableObject {
     @Published var trailLifetimeMs: Double = 400.0 {
         didSet { defaults.set(trailLifetimeMs, forKey: Key.trailLifetimeMs) }
     }
+    @Published var trailTriggerModeRaw: String = TrailTriggerMode.always.rawValue {
+        didSet { defaults.set(trailTriggerModeRaw, forKey: Key.trailTriggerModeRaw) }
+    }
+    @Published var spotlightEnabled: Bool = false {
+        didSet { defaults.set(spotlightEnabled, forKey: Key.spotlightEnabled) }
+    }
+    @Published var spotlightColorHex: String = "#66E8FF" {
+        didSet { defaults.set(spotlightColorHex, forKey: Key.spotlightColorHex) }
+    }
+    @Published var spotlightSize: Double = 72.0 {
+        didSet { defaults.set(spotlightSize, forKey: Key.spotlightSize) }
+    }
+    @Published var spotlightOpacity: Double = 0.58 {
+        didSet { defaults.set(spotlightOpacity, forKey: Key.spotlightOpacity) }
+    }
+    @Published var distinguishMouseButtons: Bool = false {
+        didSet { defaults.set(distinguishMouseButtons, forKey: Key.distinguishMouseButtons) }
+    }
+    @Published var rightClickColorHex: String = "#FF9F43" {
+        didSet { defaults.set(rightClickColorHex, forKey: Key.rightClickColorHex) }
+    }
+    @Published var middleClickColorHex: String = "#B48CFF" {
+        didSet { defaults.set(middleClickColorHex, forKey: Key.middleClickColorHex) }
+    }
     @Published var comboBoostEnabled: Bool = false {
         didSet { defaults.set(comboBoostEnabled, forKey: Key.comboBoostEnabled) }
     }
@@ -335,6 +427,17 @@ class AppState: NSObject, ObservableObject {
         if let value = d.object(forKey: Key.trailWidth) as? NSNumber { trailWidth = value.doubleValue }
         if let value = d.object(forKey: Key.trailOpacity) as? NSNumber { trailOpacity = value.doubleValue }
         if let value = d.object(forKey: Key.trailLifetimeMs) as? NSNumber { trailLifetimeMs = value.doubleValue }
+        if let value = d.string(forKey: Key.trailTriggerModeRaw),
+           TrailTriggerMode(rawValue: value) != nil {
+            trailTriggerModeRaw = value
+        }
+        if let value = d.object(forKey: Key.spotlightEnabled) as? Bool { spotlightEnabled = value }
+        if let value = d.string(forKey: Key.spotlightColorHex) { spotlightColorHex = value }
+        if let value = d.object(forKey: Key.spotlightSize) as? NSNumber { spotlightSize = value.doubleValue }
+        if let value = d.object(forKey: Key.spotlightOpacity) as? NSNumber { spotlightOpacity = value.doubleValue }
+        if let value = d.object(forKey: Key.distinguishMouseButtons) as? Bool { distinguishMouseButtons = value }
+        if let value = d.string(forKey: Key.rightClickColorHex) { rightClickColorHex = value }
+        if let value = d.string(forKey: Key.middleClickColorHex) { middleClickColorHex = value }
         if let value = d.object(forKey: Key.comboBoostEnabled) as? Bool { comboBoostEnabled = value }
         if let value = d.string(forKey: Key.customEmoji) { customEmoji = value }
         if let value = d.object(forKey: Key.rightClickEnabled) as? Bool { rightClickEnabled = value }
@@ -359,6 +462,10 @@ class AppState: NSObject, ObservableObject {
         )
     }
 
+    var trailTriggerMode: TrailTriggerMode {
+        TrailTriggerMode(rawValue: trailTriggerModeRaw) ?? .always
+    }
+
     var trailColor: Color {
         let hex = trailFollowsColor ? effectColorHex : trailColorHex
         return Color(hex: hex) ?? .white
@@ -376,6 +483,36 @@ class AppState: NSObject, ObservableObject {
             get: { Color(hex: self.effectColorHex) ?? .white },
             set: { self.effectColorHex = $0.toHex() ?? "#FFFFFF" }
         )
+    }
+
+    var spotlightColorBinding: Binding<Color> {
+        Binding(
+            get: { Color(hex: self.spotlightColorHex) ?? .cyan },
+            set: { self.spotlightColorHex = $0.toHex() ?? "#66E8FF" }
+        )
+    }
+
+    var rightClickColorBinding: Binding<Color> {
+        Binding(
+            get: { Color(hex: self.rightClickColorHex) ?? .orange },
+            set: { self.rightClickColorHex = $0.toHex() ?? "#FF9F43" }
+        )
+    }
+
+    var middleClickColorBinding: Binding<Color> {
+        Binding(
+            get: { Color(hex: self.middleClickColorHex) ?? .purple },
+            set: { self.middleClickColorHex = $0.toHex() ?? "#B48CFF" }
+        )
+    }
+
+    func effectColor(for button: MouseButtonKind) -> Color {
+        guard distinguishMouseButtons else { return Color(hex: effectColorHex) ?? .white }
+        switch button {
+        case .left: return Color(hex: effectColorHex) ?? .white
+        case .right: return Color(hex: rightClickColorHex) ?? .orange
+        case .middle: return Color(hex: middleClickColorHex) ?? .purple
+        }
     }
 
     var emojiChoices: [String] {
@@ -482,8 +619,89 @@ class AppState: NSObject, ObservableObject {
         if let width = preset.trailWidth { trailWidth = width }
         if let opacity = preset.trailOpacity { trailOpacity = opacity }
         if let lifetime = preset.trailLifetimeMs { trailLifetimeMs = lifetime }
+        if let trigger = preset.trailTriggerMode, TrailTriggerMode(rawValue: trigger) != nil {
+            trailTriggerModeRaw = trigger
+        }
+        if let enabled = preset.spotlightEnabled { spotlightEnabled = enabled }
+        if let color = preset.spotlightColorHex { spotlightColorHex = color }
+        if let size = preset.spotlightSize { spotlightSize = size }
+        if let opacity = preset.spotlightOpacity { spotlightOpacity = opacity }
+        if let distinguish = preset.distinguishMouseButtons { distinguishMouseButtons = distinguish }
+        if let color = preset.rightClickColorHex { rightClickColorHex = color }
+        if let color = preset.middleClickColorHex { middleClickColorHex = color }
         randomEffectEnabled = false
         comboCount = 0
+    }
+
+    func apply(_ scene: ScenePreset) {
+        randomEffectEnabled = false
+        comboBoostEnabled = false
+        comboCount = 0
+        spotlightEnabled = true
+        distinguishMouseButtons = true
+        rightClickEnabled = true
+        rightClickColorHex = "#FF9F43"
+        middleClickColorHex = "#B48CFF"
+
+        switch scene {
+        case .tutorial:
+            effectStyleRaw = EffectStyle.ripple.rawValue
+            effectColorHex = "#42A5FF"
+            particleCount = 7
+            particleSize = 7
+            particleRadius = 28
+            durationMs = 520
+            scale = 0.9
+            spotlightColorHex = "#FFD166"
+            spotlightSize = 82
+            spotlightOpacity = 0.62
+            trailEnabled = false
+            trailTriggerModeRaw = TrailTriggerMode.dragging.rawValue
+        case .recording:
+            effectStyleRaw = EffectStyle.spark.rawValue
+            effectColorHex = "#FFFFFF"
+            particleCount = 6
+            particleSize = 6
+            particleRadius = 18
+            durationMs = 360
+            scale = 0.85
+            spotlightColorHex = "#66E8FF"
+            spotlightSize = 68
+            spotlightOpacity = 0.45
+            trailEnabled = false
+            trailTriggerModeRaw = TrailTriggerMode.dragging.rawValue
+        case .live:
+            effectStyleRaw = EffectStyle.burst.rawValue
+            effectColorHex = "#66E8FF"
+            particleCount = 9
+            particleSize = 8
+            particleRadius = 38
+            durationMs = 560
+            scale = 1.0
+            spotlightColorHex = "#FF77C8"
+            spotlightSize = 78
+            spotlightOpacity = 0.52
+            trailEnabled = true
+            trailStyleRaw = TrailStyle.neon.rawValue
+            trailFollowsColor = true
+            trailWidth = 9
+            trailOpacity = 0.72
+            trailLifetimeMs = 560
+            trailTriggerModeRaw = TrailTriggerMode.always.rawValue
+        case .minimal:
+            effectStyleRaw = EffectStyle.ripple.rawValue
+            effectColorHex = "#FFFFFF"
+            particleCount = 4
+            particleSize = 5
+            particleRadius = 20
+            durationMs = 360
+            scale = 0.8
+            spotlightColorHex = "#FFFFFF"
+            spotlightSize = 58
+            spotlightOpacity = 0.34
+            trailEnabled = false
+            trailTriggerModeRaw = TrailTriggerMode.dragging.rawValue
+        }
     }
 
     @discardableResult
@@ -506,7 +724,15 @@ class AppState: NSObject, ObservableObject {
             trailFollowsColor: trailFollowsColor,
             trailWidth: trailWidth,
             trailOpacity: trailOpacity,
-            trailLifetimeMs: trailLifetimeMs
+            trailLifetimeMs: trailLifetimeMs,
+            trailTriggerMode: trailTriggerModeRaw,
+            spotlightEnabled: spotlightEnabled,
+            spotlightColorHex: spotlightColorHex,
+            spotlightSize: spotlightSize,
+            spotlightOpacity: spotlightOpacity,
+            distinguishMouseButtons: distinguishMouseButtons,
+            rightClickColorHex: rightClickColorHex,
+            middleClickColorHex: middleClickColorHex
         )
         if let index = savedPresets.firstIndex(where: { $0.name == finalName }) {
             savedPresets[index] = snapshot
@@ -537,6 +763,14 @@ class AppState: NSObject, ObservableObject {
         trailWidth = 10
         trailOpacity = 1.0
         trailLifetimeMs = 400
+        trailTriggerModeRaw = TrailTriggerMode.always.rawValue
+        spotlightEnabled = false
+        spotlightColorHex = "#66E8FF"
+        spotlightSize = 72
+        spotlightOpacity = 0.58
+        distinguishMouseButtons = false
+        rightClickColorHex = "#FF9F43"
+        middleClickColorHex = "#B48CFF"
         comboBoostEnabled = false
         customEmoji = "✨"
         rightClickEnabled = true
@@ -618,11 +852,11 @@ nonisolated private func clickBoomHotKeyHandler(
 // MARK: - 应用信息
 enum AppInfo {
     static var shortVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.1.11"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2.0"
     }
 
     static var buildNumber: String {
-        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "13"
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "14"
     }
 
     static var version: String {
@@ -1006,6 +1240,21 @@ struct MenuBarQuickPanel: View {
                 Label("预设", systemImage: "slider.horizontal.3")
             }
 
+            Menu {
+                Toggle("鼠标聚光环", isOn: $appState.spotlightEnabled)
+                Toggle("区分左 / 右 / 中键", isOn: $appState.distinguishMouseButtons)
+                Divider()
+                ForEach(ScenePreset.allCases) { scene in
+                    Button {
+                        appState.apply(scene)
+                    } label: {
+                        Label(scene.title, systemImage: scene.icon)
+                    }
+                }
+            } label: {
+                Label("演示增强", systemImage: "display")
+            }
+
             if !appState.savedPresets.isEmpty {
                 Menu {
                     ForEach(appState.savedPresets) { preset in
@@ -1072,6 +1321,12 @@ struct MenuBarQuickPanel: View {
             Toggle("随机样式", isOn: $appState.randomEffectEnabled)
             Toggle("滑动拖尾", isOn: $appState.trailEnabled)
             if appState.trailEnabled {
+                Picker("触发方式", selection: $appState.trailTriggerModeRaw) {
+                    ForEach(TrailTriggerMode.allCases) { mode in
+                        Text(mode.title).tag(mode.rawValue)
+                    }
+                }
+                .pickerStyle(.menu)
                 Picker("拖尾样式", selection: $appState.trailStyleRaw) {
                     ForEach(TrailStyle.allCases) { style in
                         Text(style.title).tag(style.rawValue)
@@ -1445,6 +1700,30 @@ struct ControlPanelView: View {
                         }
 
                         SectionCard(icon: "slider.horizontal.3", title: "预设") {
+                            HStack {
+                                Text("演示场景")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(.white.opacity(0.45))
+                                Spacer()
+                            }
+
+                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                                ForEach(ScenePreset.allCases) { scene in
+                                    Button {
+                                        appState.apply(scene)
+                                    } label: {
+                                        Label(scene.title, systemImage: scene.icon)
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 7)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                }
+                            }
+
+                            Divider().background(Color.white.opacity(0.1))
+
                             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
                                 ForEach(EffectPreset.allCases) { preset in
                                     PresetButton(preset: preset) {
@@ -1505,6 +1784,52 @@ struct ControlPanelView: View {
                             ModernSlider(label: "缩放", value: $appState.scale, range: 0.5...5.0, icon: "arrow.up.left.and.arrow.down.right", format: "%.1f 倍")
                         }
 
+                        SectionCard(icon: "scope", title: "鼠标聚光") {
+                            Toggle("显示鼠标聚光环", isOn: $appState.spotlightEnabled)
+                                .toggleStyle(.switch)
+                                .tint(.cyan)
+                            Text("录屏和演示时持续标出鼠标位置，点击时会产生扩散脉冲")
+                                .font(.system(size: 11))
+                                .foregroundColor(.white.opacity(0.45))
+
+                            if appState.spotlightEnabled {
+                                HStack {
+                                    Text("聚光颜色")
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.8))
+                                    Spacer()
+                                    ColorPicker("", selection: appState.spotlightColorBinding)
+                                        .labelsHidden()
+                                }
+                                ModernSlider(label: "环大小", value: $appState.spotlightSize, range: 36...140, icon: "circle.dashed", format: "%.0f 像素")
+                                ModernSlider(label: "透明度", value: Binding(get: { appState.spotlightOpacity * 100 }, set: { appState.spotlightOpacity = $0 / 100 }), range: 15...100, icon: "circle.lefthalf.filled", format: "%.0f%%")
+                            }
+
+                            Divider().background(Color.white.opacity(0.1))
+
+                            Toggle("区分左键、右键和中键", isOn: $appState.distinguishMouseButtons)
+                                .toggleStyle(.switch)
+                                .tint(.orange)
+                            Text("左键使用效果颜色，右键和中键使用独立颜色")
+                                .font(.system(size: 11))
+                                .foregroundColor(.white.opacity(0.45))
+
+                            if appState.distinguishMouseButtons {
+                                HStack {
+                                    Text("右键")
+                                        .foregroundColor(.white.opacity(0.75))
+                                    ColorPicker("", selection: appState.rightClickColorBinding)
+                                        .labelsHidden()
+                                    Spacer()
+                                    Text("中键")
+                                        .foregroundColor(.white.opacity(0.75))
+                                    ColorPicker("", selection: appState.middleClickColorBinding)
+                                        .labelsHidden()
+                                }
+                                .font(.system(size: 12, weight: .medium))
+                            }
+                        }
+
                         SectionCard(icon: "scribble.variable", title: "拖尾") {
                             HStack(spacing: 8) {
                                 Spacer(minLength: 0)
@@ -1524,6 +1849,13 @@ struct ControlPanelView: View {
                                 .frame(maxWidth: .infinity)
 
                             if appState.trailEnabled {
+                                Picker("触发方式", selection: $appState.trailTriggerModeRaw) {
+                                    ForEach(TrailTriggerMode.allCases) { mode in
+                                        Text(mode.title).tag(mode.rawValue)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+
                                 HStack {
                                     Text("拖尾样式")
                                         .font(.system(size: 11, weight: .semibold))
@@ -2128,6 +2460,7 @@ struct Particle: Identifiable {
     var effect: EffectStyle
     var intensity: Double
     var emoji: String
+    var button: MouseButtonKind
 }
 
 /// 滑动拖尾上的一个采样点，时间用来做「越旧越淡」的衰减。
@@ -2149,6 +2482,9 @@ class EffectEngine: ObservableObject {
     @Published var particles: [Particle] = []
     /// 滑动拖尾的轨迹点，按时间从旧到新排列
     @Published private(set) var trailPoints: [TrailPoint] = []
+    @Published private(set) var pointerPosition: CGPoint?
+    @Published private(set) var spotlightPulseStart: Date?
+    @Published private(set) var spotlightPulseButton: MouseButtonKind = .left
 
     private var lastClickTime = Date.distantPast
     private var comboLevel = 0
@@ -2161,9 +2497,15 @@ class EffectEngine: ObservableObject {
         min(2.5, max(0.15, AppState.shared.trailLifetimeMs / 1000.0))
     }
 
-    func trigger(at point: CGPoint, force: Bool = false) {
+    func trigger(at point: CGPoint, button: MouseButtonKind = .left, force: Bool = false) {
         let state = AppState.shared
         guard force || (state.isEnabled && !state.isPaused) else { return }
+
+        pointerPosition = point
+        if state.spotlightEnabled {
+            spotlightPulseStart = Date()
+            spotlightPulseButton = button
+        }
 
         let effect = state.randomEffectEnabled
             ? (EffectStyle.allCases.randomElement() ?? .spark)
@@ -2205,7 +2547,8 @@ class EffectEngine: ObservableObject {
                 variation: variation,
                 effect: effect,
                 intensity: intensity,
-                emoji: emoji
+                emoji: emoji,
+                button: button
             ))
         }
         let overflow = max(0, particles.count + newParticles.count - Self.maxParticles)
@@ -2217,6 +2560,13 @@ class EffectEngine: ObservableObject {
         // 点击时顺手补一个拖尾光点：先画光带再点也没关系，两者互不抢占
         if state.trailEnabled && !force {
             beginTrail(at: point)
+        }
+    }
+
+    func updatePointer(at point: CGPoint, shouldExtendTrail: Bool) {
+        pointerPosition = point
+        if shouldExtendTrail {
+            extendTrail(at: point)
         }
     }
 
@@ -2316,6 +2666,11 @@ class EffectEngine: ObservableObject {
         if aliveTrail.count != trailPoints.count {
             trailPoints = aliveTrail
         }
+
+        if let spotlightPulseStart,
+           currentTime.timeIntervalSince(spotlightPulseStart) >= 0.42 {
+            self.spotlightPulseStart = nil
+        }
     }
 }
 
@@ -2327,15 +2682,24 @@ struct EffectOverlayView: View {
     @ObservedObject private var accessibility = AccessibilitySettings.shared
 
     var body: some View {
-        // 没有粒子也没有拖尾时暂停时间线，避免空闲状态一直 60fps 重绘（省电）
-        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: engine.particles.isEmpty && engine.trailPoints.isEmpty)) { context in
+        // 静止的聚光环靠鼠标位置变化驱动；只在有动画时保持 60fps。
+        TimelineView(.animation(
+            minimumInterval: 1.0 / 60.0,
+            paused: engine.particles.isEmpty && engine.trailPoints.isEmpty && engine.spotlightPulseStart == nil
+        )) { context in
             Canvas { ctx, size in
                 let now = context.date
                 let durationSec = appState.durationMs / 1000.0
-                let color = appState.effectColor.wrappedValue
                 let sizeVal = appState.particleSize
                 let radius = appState.particleRadius
                 let scale = appState.scale
+
+                if appState.spotlightEnabled,
+                   appState.isEnabled,
+                   !appState.isPaused,
+                   let pointer = engine.pointerPosition {
+                    drawSpotlight(at: pointer, now: now, context: ctx)
+                }
 
                 // 拖尾先画，粒子叠在上面；透明度只作用于拖尾，不拖累点击效果
                 ctx.opacity = appState.trailOpacity
@@ -2357,7 +2721,7 @@ struct EffectOverlayView: View {
                         particle.effect,
                         particle: particle,
                         progress: progress,
-                        color: color,
+                        color: appState.effectColor(for: particle.button),
                         size: sizeVal,
                         radius: radius,
                         scale: scale,
@@ -2369,23 +2733,71 @@ struct EffectOverlayView: View {
         }
         .onAppear {
             mouseMonitor.start(engine: engine)
-            syncTrailMotion()
+            syncMotion()
         }
         .onDisappear { mouseMonitor.stop() }
-        .onChange(of: appState.trailEnabled) { _, _ in syncTrailMotion() }
+        .onChange(of: appState.trailEnabled) { _, _ in syncMotion() }
+        .onChange(of: appState.spotlightEnabled) { _, _ in syncMotion() }
         .onChange(of: permission.isGranted) { _, granted in
             // 用户在「系统设置」里刚勾上输入监控时，启动阶段注册的监听往往收不到事件，
             // 重建一次监听即可让权限立刻生效，不必重启 App。
             if granted {
                 mouseMonitor.restart(engine: engine)
-                syncTrailMotion()
+                syncMotion()
             }
         }
     }
 
-    /// 拖尾开关打开时才监听鼠标移动，关闭时不额外占用事件通道
-    private func syncTrailMotion() {
-        mouseMonitor.syncTrailMotion(enabled: appState.trailEnabled, engine: engine)
+    /// 聚光环和拖尾共用一条鼠标移动监听，两者都关闭时及时释放。
+    private func syncMotion() {
+        let enabled = appState.trailEnabled || appState.spotlightEnabled
+        mouseMonitor.syncMotion(enabled: enabled, engine: engine)
+        if enabled, let point = OverlayGeometry.mousePoint() {
+            engine.updatePointer(at: point, shouldExtendTrail: false)
+        }
+    }
+
+    private func drawSpotlight(at point: CGPoint, now: Date, context: GraphicsContext) {
+        let color = Color(hex: appState.spotlightColorHex) ?? .cyan
+        let radius = max(18, appState.spotlightSize * 0.5)
+        let opacity = min(1, max(0.05, appState.spotlightOpacity))
+
+        var glow = Path()
+        glow.addEllipse(in: CGRect(
+            x: point.x - radius * 1.18,
+            y: point.y - radius * 1.18,
+            width: radius * 2.36,
+            height: radius * 2.36
+        ))
+        context.stroke(glow, with: .color(color.opacity(opacity * 0.16)), lineWidth: max(7, radius * 0.22))
+
+        var ring = Path()
+        ring.addEllipse(in: CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2))
+        context.stroke(
+            ring,
+            with: .color(color.opacity(opacity)),
+            style: StrokeStyle(lineWidth: max(2, radius * 0.065), lineCap: .round)
+        )
+
+        guard let pulseStart = engine.spotlightPulseStart else { return }
+        let pulseColor = appState.distinguishMouseButtons
+            ? appState.effectColor(for: engine.spotlightPulseButton)
+            : color
+        let progress = min(1, max(0, now.timeIntervalSince(pulseStart) / 0.42))
+        let eased = 1 - pow(1 - progress, 3)
+        let pulseRadius = radius * (0.72 + eased * 0.72)
+        var pulse = Path()
+        pulse.addEllipse(in: CGRect(
+            x: point.x - pulseRadius,
+            y: point.y - pulseRadius,
+            width: pulseRadius * 2,
+            height: pulseRadius * 2
+        ))
+        context.stroke(
+            pulse,
+            with: .color(pulseColor.opacity(opacity * (1 - progress) * 0.9)),
+            style: StrokeStyle(lineWidth: max(2, radius * 0.08) * (1 - progress * 0.45), lineCap: .round)
+        )
     }
 
     /// 以 (0,0) 为中心、边长 size 的爱心路径
@@ -3161,8 +3573,8 @@ final class GlobalMouseMonitor: ObservableObject {
     private var localMonitor: Any?
     private var motionGlobalMonitor: Any?
     private var motionLocalMonitor: Any?
-    /// 记录当前是否需要移动监听，权限变化重建时好恢复
-    private var isTrailMotionActive = false
+    /// 记录当前是否需要移动监听，权限变化重建时好恢复。
+    private var isMotionActive = false
 
     func start(engine: EffectEngine) {
         guard globalMonitor == nil, localMonitor == nil else { return }
@@ -3171,15 +3583,16 @@ final class GlobalMouseMonitor: ObservableObject {
 
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak engine] event in
             guard Self.supports(event) else { return }
+            let button = Self.buttonKind(for: event)
             DispatchQueue.main.async {
                 guard let point = OverlayGeometry.mousePoint() else { return }
-                engine?.trigger(at: point)
+                engine?.trigger(at: point, button: button)
             }
         }
 
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak engine] event in
             if Self.supports(event), let point = OverlayGeometry.mousePoint() {
-                engine?.trigger(at: point)
+                engine?.trigger(at: point, button: Self.buttonKind(for: event))
             }
             return event
         }
@@ -3195,38 +3608,46 @@ final class GlobalMouseMonitor: ObservableObject {
         }
     }
 
-    /// 拖尾开关打开时才安装移动监听，关闭时及时释放事件通道
-    func syncTrailMotion(enabled: Bool, engine: EffectEngine) {
-        isTrailMotionActive = enabled
-        if enabled {
-            startTrailMotion(engine: engine)
-        } else {
-            stopTrailMotion()
+    private static func buttonKind(for event: NSEvent) -> MouseButtonKind {
+        switch event.type {
+        case .rightMouseDown: return .right
+        case .otherMouseDown: return .middle
+        default: return .left
         }
     }
 
-    private func startTrailMotion(engine: EffectEngine) {
+    /// 聚光环和拖尾共用移动监听，避免重复注册全局事件。
+    func syncMotion(enabled: Bool, engine: EffectEngine) {
+        isMotionActive = enabled
+        if enabled {
+            startMotion(engine: engine)
+        } else {
+            stopMotion()
+        }
+    }
+
+    private func startMotion(engine: EffectEngine) {
         guard motionGlobalMonitor == nil, motionLocalMonitor == nil else { return }
 
         let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged]
 
         motionGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak engine] event in
-            guard Self.supportsMotion(event) else { return }
+            let shouldExtendTrail = Self.shouldExtendTrail(for: event)
             DispatchQueue.main.async {
                 guard let point = OverlayGeometry.mousePoint() else { return }
-                engine?.extendTrail(at: point)
+                engine?.updatePointer(at: point, shouldExtendTrail: shouldExtendTrail)
             }
         }
 
         motionLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak engine] event in
-            if Self.supportsMotion(event), let point = OverlayGeometry.mousePoint() {
-                engine?.extendTrail(at: point)
+            if let point = OverlayGeometry.mousePoint() {
+                engine?.updatePointer(at: point, shouldExtendTrail: Self.shouldExtendTrail(for: event))
             }
             return event
         }
     }
 
-    private func stopTrailMotion() {
+    private func stopMotion() {
         if let motionGlobalMonitor {
             NSEvent.removeMonitor(motionGlobalMonitor)
             self.motionGlobalMonitor = nil
@@ -3237,13 +3658,22 @@ final class GlobalMouseMonitor: ObservableObject {
         }
     }
 
-    /// 拖动右键 / 中键是否也留拖尾，和点击效果用同一个开关
-    private static func supportsMotion(_ event: NSEvent) -> Bool {
-        switch event.type {
-        case .rightMouseDragged, .otherMouseDragged:
-            return AppState.shared.rightClickEnabled
-        default:
+    private static func shouldExtendTrail(for event: NSEvent) -> Bool {
+        let state = AppState.shared
+        guard state.trailEnabled else { return false }
+        if (event.type == .rightMouseDragged || event.type == .otherMouseDragged),
+           !state.rightClickEnabled {
+            return false
+        }
+        switch state.trailTriggerMode {
+        case .always:
             return true
+        case .dragging:
+            return event.type != .mouseMoved
+        case .optionKey:
+            return event.modifierFlags.contains(.option)
+        case .commandKey:
+            return event.modifierFlags.contains(.command)
         }
     }
 
@@ -3256,17 +3686,17 @@ final class GlobalMouseMonitor: ObservableObject {
             NSEvent.removeMonitor(localMonitor)
             self.localMonitor = nil
         }
-        stopTrailMotion()
-        isTrailMotionActive = false
+        stopMotion()
+        isMotionActive = false
     }
 
     /// 输入监控权限变化后重建监听：早期注册的监听不会随权限自动开始投递事件。
     func restart(engine: EffectEngine) {
-        let trailWasActive = isTrailMotionActive
+        let motionWasActive = isMotionActive
         stop()
         start(engine: engine)
-        if trailWasActive {
-            syncTrailMotion(enabled: true, engine: engine)
+        if motionWasActive {
+            syncMotion(enabled: true, engine: engine)
         }
     }
 }
