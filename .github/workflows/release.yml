@@ -34,7 +34,7 @@ jobs:
             exit 1
           fi
 
-      - name: 构建 DMG（未签名）
+      - name: 构建 DMG（ad-hoc 签名）
         env:
           SKIP_SIGN: "1"
         run: ./scripts/release.sh
@@ -46,7 +46,7 @@ jobs:
           name: ClickBoom-dmg
           path: dist/*.dmg
 
-      # 只在还没有 DMG 附件时补上去：本地签名的包优先级更高，不会被 CI 的未签名包覆盖
+      # 只在还没有 DMG 附件时补上去：本地正式签名的包优先级更高，不会被 CI 的 ad-hoc 包覆盖
       - name: 补到 GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         env:

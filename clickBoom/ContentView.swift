@@ -852,11 +852,11 @@ nonisolated private func clickBoomHotKeyHandler(
 // MARK: - 应用信息
 enum AppInfo {
     static var shortVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2.0"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2.1"
     }
 
     static var buildNumber: String {
-        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "14"
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "15"
     }
 
     static var version: String {
@@ -893,7 +893,6 @@ final class UpdateChecker: ObservableObject {
         let last = UserDefaults.standard.double(forKey: lastCheckKey)
         let now = Date().timeIntervalSince1970
         guard last <= 0 || now - last >= interval else { return }
-        UserDefaults.standard.set(now, forKey: lastCheckKey)
         check()
     }
 
@@ -904,10 +903,22 @@ final class UpdateChecker: ObservableObject {
         var request = URLRequest(url: latestURL)
         request.timeoutInterval = 15
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("ClickBoom/\(AppInfo.shortVersion)", forHTTPHeaderField: "User-Agent")
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
 
-        URLSession.shared.dataTask(with: request) { [weak self] data, _, error in
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            let httpResponse = response as? HTTPURLResponse
             let result: Status
-            if let data,
+            if let error {
+                result = .failed(error.localizedDescription)
+            } else if let httpResponse,
+                      !(200..<300).contains(httpResponse.statusCode) {
+                if httpResponse.statusCode == 429 || httpResponse.statusCode == 403 {
+                    result = .failed("GitHub 请求频率受限，请稍后再试")
+                } else {
+                    result = .failed("服务器返回 HTTP \(httpResponse.statusCode)")
+                }
+            } else if let data,
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let tag = json["tag_name"] as? String {
                 let remote = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
@@ -922,12 +933,15 @@ final class UpdateChecker: ObservableObject {
                 result = Self.isNewer(remote, than: AppInfo.shortVersion)
                     ? .available(version: remote, downloadURL: download, pageURL: page)
                     : .latest
-            } else if let error {
-                result = .failed(error.localizedDescription)
             } else {
                 result = .failed("无法解析服务器响应")
             }
-            DispatchQueue.main.async { self?.status = result }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.status = result
+                if case .failed = result { return }
+                UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: self.lastCheckKey)
+            }
         }.resume()
     }
 
@@ -943,14 +957,39 @@ final class UpdateChecker: ObservableObject {
 
     /// 逐段比较版本号，缺位补 0
     nonisolated static func isNewer(_ remote: String, than local: String) -> Bool {
-        let r = remote.split(separator: ".").map { Int($0) ?? 0 }
-        let l = local.split(separator: ".").map { Int($0) ?? 0 }
-        for i in 0..<max(r.count, l.count) {
-            let rv = i < r.count ? r[i] : 0
-            let lv = i < l.count ? l[i] : 0
+        let remoteVersion = parsedVersion(remote)
+        let localVersion = parsedVersion(local)
+        for i in 0..<max(remoteVersion.numbers.count, localVersion.numbers.count) {
+            let rv = i < remoteVersion.numbers.count ? remoteVersion.numbers[i] : 0
+            let lv = i < localVersion.numbers.count ? localVersion.numbers[i] : 0
             if rv != lv { return rv > lv }
         }
-        return false
+        switch (remoteVersion.prerelease, localVersion.prerelease) {
+        case (nil, nil):
+            return false
+        case (.some, nil):
+            return false
+        case (nil, .some):
+            return true
+        case let (.some(remoteTag), .some(localTag)):
+            return remoteTag > localTag
+        }
+    }
+
+    private nonisolated static func parsedVersion(
+        _ rawVersion: String
+    ) -> (numbers: [Int], prerelease: String?) {
+        let withoutPrefix = rawVersion.hasPrefix("v") ? String(rawVersion.dropFirst()) : rawVersion
+        let parts = withoutPrefix.split(
+            separator: "-",
+            maxSplits: 1,
+            omittingEmptySubsequences: false
+        )
+        let numbers = parts[0].split(separator: ".").map { component in
+            Int(component.prefix { $0.isNumber }) ?? 0
+        }
+        let prerelease = parts.count > 1 && !parts[1].isEmpty ? String(parts[1]) : nil
+        return (numbers, prerelease)
     }
 }
 
@@ -1144,7 +1183,23 @@ struct MenuBarQuickPanel: View {
         )
     }
 
+    /// 菜单栏窗口会按内容自适应高度；在小屏上限制上限并允许滚动，避免底部操作被截断。
+    private var maxPanelHeight: CGFloat {
+        let availableHeight = NSScreen.main?.visibleFrame.height ?? 900
+        return max(360, min(780, availableHeight - 32))
+    }
+
     var body: some View {
+        ScrollView {
+            panelContent
+        }
+        .frame(width: 360)
+        .frame(maxHeight: maxPanelHeight)
+        .scrollIndicators(.visible)
+        .environment(\.locale, Locale(identifier: "zh-Hans"))
+    }
+
+    private var panelContent: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
                 Image(systemName: appState.isPaused ? "pause.circle.fill" : "sparkles")
@@ -1432,8 +1487,6 @@ struct MenuBarQuickPanel: View {
             .buttonStyle(.plain)
         }
         .padding(18)
-        .frame(width: 360)
-        .environment(\.locale, Locale(identifier: "zh-Hans"))
     }
 
     private var updateStatusText: String {
@@ -2738,6 +2791,8 @@ struct EffectOverlayView: View {
         .onDisappear { mouseMonitor.stop() }
         .onChange(of: appState.trailEnabled) { _, _ in syncMotion() }
         .onChange(of: appState.spotlightEnabled) { _, _ in syncMotion() }
+        .onChange(of: appState.isEnabled) { _, _ in syncMotion() }
+        .onChange(of: appState.isPaused) { _, _ in syncMotion() }
         .onChange(of: permission.isGranted) { _, granted in
             // 用户在「系统设置」里刚勾上输入监控时，启动阶段注册的监听往往收不到事件，
             // 重建一次监听即可让权限立刻生效，不必重启 App。
@@ -2750,9 +2805,10 @@ struct EffectOverlayView: View {
 
     /// 聚光环和拖尾共用一条鼠标移动监听，两者都关闭时及时释放。
     private func syncMotion() {
-        let enabled = appState.trailEnabled || appState.spotlightEnabled
-        mouseMonitor.syncMotion(enabled: enabled, engine: engine)
-        if enabled, let point = OverlayGeometry.mousePoint() {
+        let needsMotion = appState.trailEnabled || appState.spotlightEnabled
+        let shouldMonitor = appState.isEnabled && !appState.isPaused && needsMotion
+        mouseMonitor.syncMotion(enabled: shouldMonitor, engine: engine)
+        if shouldMonitor, let point = OverlayGeometry.mousePoint() {
             engine.updatePointer(at: point, shouldExtendTrail: false)
         }
     }
@@ -3569,10 +3625,13 @@ struct EffectOverlayView: View {
 
 @MainActor
 final class GlobalMouseMonitor: ObservableObject {
+    private static let motionDispatchInterval: TimeInterval = 1.0 / 60.0
+
     private var globalMonitor: Any?
     private var localMonitor: Any?
     private var motionGlobalMonitor: Any?
     private var motionLocalMonitor: Any?
+    private var lastMotionDispatchTime = Date.distantPast
     /// 记录当前是否需要移动监听，权限变化重建时好恢复。
     private var isMotionActive = false
 
@@ -3630,21 +3689,41 @@ final class GlobalMouseMonitor: ObservableObject {
         guard motionGlobalMonitor == nil, motionLocalMonitor == nil else { return }
 
         let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged]
+        lastMotionDispatchTime = .distantPast
 
-        motionGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak engine] event in
+        motionGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self, weak engine] event in
             let shouldExtendTrail = Self.shouldExtendTrail(for: event)
             DispatchQueue.main.async {
-                guard let point = OverlayGeometry.mousePoint() else { return }
-                engine?.updatePointer(at: point, shouldExtendTrail: shouldExtendTrail)
+                self?.dispatchMotion(to: engine, shouldExtendTrail: shouldExtendTrail)
             }
         }
 
-        motionLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak engine] event in
-            if let point = OverlayGeometry.mousePoint() {
-                engine?.updatePointer(at: point, shouldExtendTrail: Self.shouldExtendTrail(for: event))
-            }
+        motionLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self, weak engine] event in
+            self?.dispatchMotion(to: engine, shouldExtendTrail: Self.shouldExtendTrail(for: event))
             return event
         }
+    }
+
+    /// 高回报率鼠标每秒会产生大量事件；进入主线程前按 60Hz 合并，保留顺滑度并降低功耗。
+    private func dispatchMotion(to engine: EffectEngine?, shouldExtendTrail: Bool) {
+        guard let engine else { return }
+        let state = AppState.shared
+        guard state.isEnabled,
+              !state.isPaused,
+              state.trailEnabled || state.spotlightEnabled else {
+            syncMotion(enabled: false, engine: engine)
+            return
+        }
+
+        let now = Date()
+        guard now.timeIntervalSince(lastMotionDispatchTime) >= Self.motionDispatchInterval else { return }
+        lastMotionDispatchTime = now
+
+        guard let point = OverlayGeometry.mousePoint() else { return }
+        engine.updatePointer(
+            at: point,
+            shouldExtendTrail: shouldExtendTrail && state.trailEnabled
+        )
     }
 
     private func stopMotion() {
@@ -3656,6 +3735,7 @@ final class GlobalMouseMonitor: ObservableObject {
             NSEvent.removeMonitor(motionLocalMonitor)
             self.motionLocalMonitor = nil
         }
+        lastMotionDispatchTime = .distantPast
     }
 
     private static func shouldExtendTrail(for event: NSEvent) -> Bool {

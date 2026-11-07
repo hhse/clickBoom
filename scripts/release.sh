@@ -4,7 +4,7 @@
 #
 # 常用：
 #   ./scripts/release.sh                             # 本机自动签名，输出 dist/ClickBoom-<版本>.dmg
-#   SKIP_SIGN=1 ./scripts/release.sh                 # 不签名（CI 或本地快速验证）
+#   SKIP_SIGN=1 ./scripts/release.sh                 # ad-hoc 签名，保留沙盒权限（CI 或本地验证）
 #
 # 正式分发（需要 Developer ID 证书 + 公证凭据）：
 #   xcrun notarytool store-credentials clickboom \
@@ -53,7 +53,14 @@ BUILD_ARGS=(
 )
 
 if [[ "${SKIP_SIGN:-0}" == "1" ]]; then
-  BUILD_ARGS+=(CODE_SIGNING_ALLOWED=NO)
+  # 不能用 CODE_SIGNING_ALLOWED=NO：那样连 App Sandbox entitlement 都不会写入，
+  # 覆盖安装后会从沙盒容器切到全局 Preferences，导致用户设置“消失”。
+  BUILD_ARGS+=(
+    CODE_SIGN_STYLE=Manual
+    CODE_SIGN_IDENTITY=-
+    CODE_SIGNING_REQUIRED=YES
+    CODE_SIGNING_ALLOWED=YES
+  )
 elif [[ -n "${SIGN_IDENTITY:-}" ]]; then
   BUILD_ARGS+=(CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$SIGN_IDENTITY" OTHER_CODE_SIGN_FLAGS="--timestamp")
 fi
@@ -95,7 +102,7 @@ SIZE="$(du -h "$OUT_DMG" | awk '{print $1}')"
 echo "==> 完成：${OUT_DMG}（${SIZE}）"
 
 if [[ "${SKIP_SIGN:-0}" == "1" ]]; then
-  echo "    注意：这是未签名构建，仅适合本地验证，不要直接分发。"
+  echo "    注意：这是 ad-hoc 签名构建，保留沙盒权限，但仅适合本地验证，不要直接分发。"
 elif [[ -z "${NOTARY_PROFILE:-}" ]]; then
   echo "    提示：当前未做公证，别人下载后会被 Gatekeeper 拦一次（见 README「首次打开」）。"
 fi
